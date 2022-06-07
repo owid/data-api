@@ -32,10 +32,13 @@ Docs are available at http://127.0.0.1:8000/v1/docs.
 
 ### Sample Queries
 
+Sample queries written in [httpie](https://httpie.io/)
+
 - http GET http://127.0.0.1:8000/health
 - http GET http://127.0.0.1:8000/v1/variableById/data/42539
 - http GET http://127.0.0.1:8000/v1/variableById/metadata/42539
-
+- http POST http://127.0.0.1:8000/v1/sql sql=="PRAGMA show_tables;" type==csv
+- http POST http://127.0.0.1:8000/v1/sql sql=="select * from garden__ggdc__2020_10_01__ggdc_maddison__maddison_gdp limit 10;" type==csv
 
 ## Tests
 
@@ -49,3 +52,8 @@ It is useful to recreate sample DB for testing and run tests right after that fo
 ```
 make testdb && pytest -s tests/test_v1.py
 ```
+
+## Full-text search
+
+- all variables are given the same weight, we should reconsider that
+- negation queries are not supported yet (could be useful for interactive exclusion of datasets)

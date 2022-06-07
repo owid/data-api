@@ -1,10 +1,10 @@
-import threading
-from typing import cast, Optional
-
 import io
-import pandas as pd
-import structlog
+import threading
+from typing import Any, Literal, Optional, cast
 
+import pandas as pd
+import pyarrow as pa
+import structlog
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pyarrow.feather import write_feather
@@ -17,7 +17,80 @@ from .schemas import VariableDataResponse
 log = structlog.get_logger()
 
 
+DATA_TYPES = Literal["csv", "feather", "feather_direct", "json"]
+
 router = APIRouter()
+
+
+def _read_sql_bytes(con, sql: str, parameters) -> io.BytesIO:
+    """Execute SQL and return BytesIO object with byte data."""
+    sink = io.BytesIO()
+
+    batch_iterator = con.execute(sql, parameters=parameters).fetch_record_batch(
+        chunk_size=1000
+    )
+    with pa.ipc.new_file(sink, batch_iterator.schema) as writer:
+        for rb in batch_iterator:
+            writer.write_batch(rb)
+
+    sink.seek(0)
+
+    return sink
+
+
+def _sql_to_response(
+    con, sql: str, type: DATA_TYPES, parameters: list[Any] = []
+) -> Any:
+    # read data in feather format and return it directly in response
+    # NOTE: should be the fastest in theory, but is really slow for unknown reasons
+    if type == "feather_direct":
+        bytes_io = _read_sql_bytes(con, sql, parameters=parameters)
+        # NOTE: this approach is much faster than `StreamingResponse(bytes_io, ...`, how is it possible?
+        # response = StreamingResponse(
+        #     iter([bytes_io.getvalue()]), media_type="application/octet-stream"
+        # )
+        response = StreamingResponse(bytes_io, media_type="application/octet-stream")
+        response.headers["Content-Disposition"] = "attachment; filename=test.feather"
+        return response
+
+    # read data into dataframe and then convert to feather
+    elif type == "feather":
+        bytes_io = io.BytesIO()
+        df = con.execute(sql, parameters=parameters).fetch_df()
+        write_feather(df, bytes_io)
+
+        response = StreamingResponse(
+            iter([bytes_io.getvalue()]), media_type="application/octet-stream"
+        )
+        response.headers["Content-Disposition"] = "attachment; filename=test.feather"
+        return response
+
+    # read data into dataframe and then convert to csv
+    elif type == "csv":
+        df = con.execute(sql, parameters=parameters).fetch_df()
+
+        str_stream = io.StringIO()
+        df.to_csv(str_stream, index=False)
+
+        return StreamingResponse(iter([str_stream.getvalue()]), media_type="text/csv")
+
+    # read data into dataframe and then convert to json
+    elif type == "json":
+        df = con.execute(sql, parameters=parameters).fetch_df()
+
+        # TODO: converting to lists and then ormjson is slow, we could instead
+        # convert to numpy arrays on which ormjson is super fast
+        return df.to_dict(orient="list")
+
+    else:
+        raise HTTPException(status_code=400, detail=f"unknown type {type}")
+
+
+@router.post("/sql")
+def sql_query(sql: str, type: DATA_TYPES = "csv"):
+    """Run arbitrary query on top of our database."""
+    con = utils.get_readonly_connection(threading.get_ident())
+    return _sql_to_response(con, sql, type)
 
 
 # QUESTION: how about /variable/{variable_id}/data?
@@ -65,64 +138,33 @@ def data_for_backported_variable(variable_id: int, limit: Optional[int] = None):
 
 
 @router.get(
-    "/dataset/data/{channel}/{namespace}/{version}/{dataset}/{table}",
+    "/dataset/data/{channel}/{namespace}/{version}/{dataset}/{table}.{type}",
 )
-def data_for_etl_variable(
+def data_for_etl_table(
     channel: str,
     namespace: str,
     version: str,
     dataset: str,
     table: str,
+    columns: str = "*",
     limit: int = 1000000000,
+    type: DATA_TYPES = "csv",
 ):
-    """Fetch data for a single variable."""
+    """Fetch data for a table."""
 
-    df = _fetch_df_for_etl_variable(channel, namespace, version, dataset, table, limit)
-    # TODO: converting to lists and then ormjson is slow, we could instead
-    # convert to numpy arrays on which ormjson is super fast
-    return df.to_dict(orient="list")
-
-
-@router.get(
-    "/dataset/feather/{channel}/{namespace}/{version}/{dataset}/{table}",
-)
-def feather_for_etl_variable(
-    channel: str,
-    namespace: str,
-    version: str,
-    dataset: str,
-    table: str,
-    limit: int = 1000000000,
-):
-    """Fetch data for a single variable in feather format."""
-    stream = io.BytesIO()
-    df = _fetch_df_for_etl_variable(channel, namespace, version, dataset, table, limit)
-    write_feather(df, stream)
-
-    response = StreamingResponse(iter([stream.getvalue()]), media_type="application/octet-stream")
-    response.headers["Content-Disposition"] = "attachment; filename=test.feather"
-    return response
-
-
-def _fetch_df_for_etl_variable(
-        channel: str,
-        namespace: str,
-        version: str,
-        dataset: str,
-        table: str,
-        limit: int):
     con = utils.get_readonly_connection(threading.get_ident())
     table_db_name = sanitize_table_path(
         f"{channel}/{namespace}/{version}/{dataset}/{table}"
     )
-    q = f"""
+    sql = f"""
     select
-        *
+        {columns}
     from {table_db_name}
     limit (?)
     """
-    query_result = con.execute(q, parameters=[limit])
-    return cast(pd.DataFrame, query_result.fetch_df())
+
+    con = utils.get_readonly_connection(threading.get_ident())
+    return _sql_to_response(con, sql, type, [limit])
 
 
 def _assert_single_variable(n, variable_id):
