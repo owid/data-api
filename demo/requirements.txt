@@ -1,0 +1,2 @@
+pywebio
+git+https://github.com/owid/owid-grapher-py
