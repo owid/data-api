@@ -1,7 +1,7 @@
 import datetime as dt
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Extra
 
 
 class VariableDataResponse(BaseModel):
@@ -11,12 +11,19 @@ class VariableDataResponse(BaseModel):
     entity_code: List[str]
     value: List[Any]
 
+    class Config:
+        extra = Extra.forbid
+
 
 class VariableDisplay(BaseModel):
     name: Optional[str]
     unit: Optional[str]
     shortUnit: Optional[str]
     includeInTable: Optional[bool]
+    conversionFactor: Optional[float]
+
+    class Config:
+        extra = Extra.forbid
 
 
 class VariableSource(BaseModel):
@@ -28,21 +35,33 @@ class VariableSource(BaseModel):
     retrievedDate: str
     additionalInfo: str
 
+    class Config:
+        extra = Extra.forbid
+
 
 class DimensionProperties(BaseModel):
     id: int
     name: Optional[str] = None
     code: Optional[str] = None
 
+    class Config:
+        extra = Extra.forbid
+
 
 class Dimension(BaseModel):
     type: str
     values: List[DimensionProperties]
 
+    class Config:
+        extra = Extra.forbid
+
 
 class Dimensions(BaseModel):
     years: Dimension
     entities: Dimension
+
+    class Config:
+        extra = Extra.forbid
 
 
 class VariableMetadataResponse(BaseModel):
@@ -62,3 +81,6 @@ class VariableMetadataResponse(BaseModel):
     source: VariableSource
     type: str
     dimensions: Dimensions
+
+    class Config:
+        extra = Extra.forbid

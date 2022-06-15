@@ -1,4 +1,5 @@
 import json
+import urllib.error
 from pathlib import Path
 from typing import Any, Dict, cast, List
 
@@ -20,6 +21,10 @@ def _load_catalog_frame(channels=()) -> CatalogFrame:
     frame = RemoteCatalog(channels=channels).frame
     # TODO: move dimension parsing into CatalogFrame
     frame["dimensions"] = frame["dimensions"].map(json.loads)
+
+    # only public data
+    frame = frame.loc[frame["is_public"]]
+
     return frame
 
 
@@ -54,6 +59,7 @@ def _load_table_data_into_db(t: CatalogSeries, table: Table, table_db_name: str,
     DTYPE_MAP = {
         "UInt32": "Int64",
         "UInt16": "Int32",
+        "UInt8": "Int16",
     }
     for dtype_from, dtype_to in DTYPE_MAP.items():
         df = df.astype({c: dtype_to for c in df.select_dtypes(dtype_from).columns})
@@ -133,11 +139,16 @@ def _parse_meta_variable(
 
     v["sources"] = json.dumps(v.get("sources", []))
     v["grapher_meta"] = json.dumps(v.get("grapher_meta", {}))
+    v["display"] = json.dumps(v.get("display", {}))
+
+    # assert that we don't have any extra columns
+    extra_keys = v.keys() - set(MetaVariableModel._sa_class_manager.keys())
+    assert not extra_keys, f"Extra keys {extra_keys}"
 
     return MetaVariableModel(**_omit_nullable_values(v))
 
 
-def _delete_table(table_path: str, session: Session):
+def _delete_table(table_path: str, session: Session) -> None:
     session.query(MetaTableModel).filter_by(path=table_path).delete()
     session.query(MetaVariableModel).filter_by(table_path=table_path).delete()
 
@@ -166,17 +177,39 @@ def main(duckdb_path: Path = Path("duck.db"), dataset_id: List[int] = []) -> Non
         create_tables=len(table_paths_to_create),
     )
 
-    for _, t in frame[frame.path.isin(table_paths_to_create)].iterrows():
-        log.info("table.create", path=t.path, table=t.table)
+    frame = frame.loc[frame.path.isin(table_paths_to_create)]
+
+    for i, (_, t) in enumerate(frame.iterrows()):
+        log.info(
+            "table.create", path=t.path, table=t.table, progress=f"{i + 1}/{len(frame)}"
+        )
 
         t = cast(CatalogSeries, t)
 
         missing_dims = REQUIRED_DIMENSIONS - set(t["dimensions"])
-        assert not missing_dims, f"Missing dimensions: {missing_dims}"
+        # TODO: this should raise an error, but we need to be deleting zombie data first
+        # assert not missing_dims, f"Missing dimensions: {missing_dims}"
+        if missing_dims:
+            log.warning(
+                "table.missing_dimensions",
+                path=t.path,
+            )
+            continue
 
         # download data and metadata from remote catalog
         log.info("table.download.start", path=t.path)
-        table = t.load()
+        try:
+            table = t.load()
+        except urllib.error.HTTPError as e:
+            # TODO: this should happen very rarely only if data is not synced with catalog
+            # we should raise an exception once we turn on backporting and make it fast enough
+            if e.code == 403:
+                log.warning(
+                    "table.private_dataset",
+                    path=t.path,
+                )
+                continue
+
         log.info("table.download.end", path=t.path)
 
         # delete table and variables if they exist

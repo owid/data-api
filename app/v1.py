@@ -1,23 +1,21 @@
-import datetime as dt
 import functools
 import json
 import threading
-from typing import Any, Dict, List, Optional
+from typing import cast
 
-import pandas as pd
 import duckdb
+import pandas as pd
 import structlog
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 
 from app.core.config import settings
 from app.database import engine
 from app.schemas.v1 import (
+    Dimension,
+    DimensionProperties,
+    Dimensions,
     VariableDataResponse,
     VariableMetadataResponse,
-    Dimension,
-    Dimensions,
-    DimensionProperties,
     VariableSource,
 )
 
@@ -51,7 +49,11 @@ def _assert_single_variable(n, variable_id):
 
 
 # QUESTION: how about /variable/{variable_id}/data?
-@v1.get("/variableById/data/{variable_id}", response_model=VariableDataResponse)
+@v1.get(
+    "/variableById/data/{variable_id}",
+    response_model=VariableDataResponse,
+    response_model_exclude_unset=True,
+)
 def data_for_variable(variable_id: int, limit: int = 1000000000):
     """Fetch data for a single variable."""
 
@@ -66,7 +68,7 @@ def data_for_variable(variable_id: int, limit: int = 1000000000):
     from meta_variables
     where variable_id = (?)
     """
-    df = con.execute(q, parameters=[variable_id]).fetch_df()
+    df = cast(pd.DataFrame, con.execute(q, parameters=[variable_id]).fetch_df())
     _assert_single_variable(df.shape[0], variable_id)
     r = dict(df.iloc[0])
 
@@ -83,7 +85,7 @@ def data_for_variable(variable_id: int, limit: int = 1000000000):
     where {r["short_name"]} is not null
     limit (?)
     """
-    df = con.execute(q, parameters=[limit]).fetch_df()
+    df = cast(pd.DataFrame, con.execute(q, parameters=[limit]).fetch_df())
     return df.to_dict(orient="list")
 
 
@@ -101,7 +103,7 @@ def _get_dimensions():
         years_values
     from meta_variables where variable_id
     """
-    variable_type, entities_values, years_values = con.execute(q).fetchone()
+    variable_type, entities_values, years_values = con.execute(q).fetchone()  # type: ignore
 
     years_values = json.loads(years_values)
     entities_values = json.loads(entities_values)
@@ -159,6 +161,9 @@ def metadata_for_variable(variable_id: int):
     displayJson = row.pop("display")
     partialSource = json.loads(sourceDescription)
     variable = omit_nullable_values(row)
+
+    # omit `id`, this should be explicit from the query rather than calling `variables.*`
+    variable.pop("id")
 
     # NOTE: getting these is a bit of a pain, we have a lot of duplicate information
     # in our DB

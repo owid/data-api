@@ -38,6 +38,7 @@ class MetaVariableModel(Base):  # type: ignore
     grapher_meta = Column(String)
     unit = Column(String)
     short_unit = Column(String)
+    display = Column(String)
     # distinct values of years and entities encoded as JSON
     years_values = Column(String)
     entities_values = Column(String)
