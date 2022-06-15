@@ -12,6 +12,14 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.database import engine
+from app.schemas.v1 import (
+    VariableDataResponse,
+    VariableMetadataResponse,
+    Dimension,
+    Dimensions,
+    DimensionProperties,
+    VariableSource,
+)
 
 log = structlog.get_logger()
 
@@ -28,15 +36,6 @@ def get_readonly_connection(thread_id: int) -> duckdb.DuckDBPyConnection:
     # duckdb connection is not threadsafe, we have to create one connection per thread
     log.info("duckdb.new_connection", thread_id=thread_id)
     return duckdb.connect(database=settings.DUCKDB_PATH.as_posix(), read_only=True)
-
-
-# TODO: move this to a separate module with all other types
-class VariableDataResponse(BaseModel):
-    year: List[int]
-    entity_name: List[str]
-    entity_id: List[int]
-    entity_code: List[str]
-    value: List[Any]
 
 
 def _assert_single_variable(n, variable_id):
@@ -92,57 +91,6 @@ def omit_nullable_values(d: dict) -> dict:
     return {k: v for k, v in d.items() if v is not None}
 
 
-class VariableDisplay(BaseModel):
-    name: Optional[str]
-    unit: Optional[str]
-    shortUnit: Optional[str]
-    includeInTable: Optional[bool]
-
-
-class VariableSource(BaseModel):
-    id: int
-    name: str
-    dataPublishedBy: str
-    dataPublisherSource: str
-    link: str
-    retrievedDate: str
-    additionalInfo: str
-
-
-class DimensionProperties(BaseModel):
-    name: str
-    code: str
-
-
-class Dimension(BaseModel):
-    type: str
-    values: Dict[int, Optional[DimensionProperties]]
-
-
-class Dimensions(BaseModel):
-    years: Dimension
-    entities: Dimension
-
-
-class VariableMetadataResponse(BaseModel):
-    name: str
-    unit: str
-    description: str
-    createdAt: dt.datetime
-    updatedAt: dt.datetime
-    coverage: str
-    timespan: str
-    datasetId: int
-    columnOrder: int
-    datasetName: str
-    nonRedistributable: bool
-    display: VariableDisplay
-    # MAYBE CHANGE - this should be turned into an array
-    source: VariableSource
-    type: str
-    dimensions: Dimensions
-
-
 def _get_dimensions():
     # get variable types from duckdb (all metadata would be eventually retrieved in duckdb)
     con = get_readonly_connection(threading.get_ident())
@@ -165,13 +113,15 @@ def _get_dimensions():
     )
 
     dimensions = Dimensions(
-        years=Dimension(type="int", values={y: None for y in years_values}),
+        years=Dimension(
+            type="int", values=[DimensionProperties(id=y) for y in years_values]
+        ),
         entities=Dimension(
             type="int",
-            values={
-                int(entity_id): DimensionProperties(name=entity_name, code=entity_code)
-                for entity_id, entity_name, entity_code in entities_values
-            },
+            values=[
+                DimensionProperties(id=e[0], name=e[1], code=e[2])
+                for e in entities_values
+            ],
         ),
     )
 
@@ -179,7 +129,11 @@ def _get_dimensions():
 
 
 # QUESTION: how about `/variable/{variable_id}/metadata` naming?
-@v1.get("/variableById/metadata/{variable_id}", response_model=VariableMetadataResponse)
+@v1.get(
+    "/variableById/metadata/{variable_id}",
+    response_model=VariableMetadataResponse,
+    response_model_exclude_unset=True,
+)
 def metadata_for_variable(variable_id: int):
     """Fetch metadata for a single variable from database."""
     # TODO: data is fetched from grapher DB, but it will be eventally fetched from catalog
