@@ -9,8 +9,11 @@ import typer
 from duckdb_models import MetaTableModel, MetaVariableModel, db_init
 from owid.catalog import RemoteCatalog, Table
 from owid.catalog.catalogs import CatalogFrame, CatalogSeries
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm.session import Session
+
+# from sqlalchemy.engine import Engine
+# from sqlalchemy.orm.session import Session
+from sqlalchemy.future import Engine
+from sqlmodel import Session
 
 REQUIRED_DIMENSIONS = {"year", "entity_name", "entity_code", "entity_id"}
 
@@ -156,6 +159,7 @@ def _delete_table(table_path: str, session: Session) -> None:
 def main(duckdb_path: Path = Path("duck.db"), dataset_id: List[int] = []) -> None:
     """Bake ETL catalog into DuckDB."""
     engine = db_init(duckdb_path)
+
     session = Session(bind=engine)
 
     frame = _load_catalog_frame(channels=("backport",))
