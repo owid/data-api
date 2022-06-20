@@ -7,10 +7,32 @@ from sqlalchemy.ext.declarative import declarative_base
 Base = declarative_base()
 
 
+class MetaDatasetModel(Base):  # type: ignore
+    """
+    Almost identical copy of DatasetMeta from owid-catalog-py
+    """
+
+    __tablename__ = "meta_datasets"
+
+    short_name = Column(String, primary_key=True)
+    namespace = Column(String)
+    title = Column(String)
+    description = Column(String)
+    sources = Column(String)
+    licenses = Column(String)
+    is_public = Column(Boolean)
+    source_checksum = Column(String)
+    grapher_meta = Column(String)
+    version = Column(String)
+
+
 class MetaTableModel(Base):  # type: ignore
     __tablename__ = "meta_tables"
 
+    # TODO: might be better to use ids as primary key instead of name
+    # table name
     table = Column(String, primary_key=True)
+    # dataset name
     dataset = Column(String)
     version = Column(String)
     namespace = Column(String)
@@ -21,6 +43,9 @@ class MetaTableModel(Base):  # type: ignore
     format = Column(String)
     table_db_name = Column(String)
     is_public = Column(Boolean)
+    # dataset metadata
+    # TODO: create its own table with grapher_meta table
+    dataset_meta = Column(String)
 
 
 class MetaVariableModel(Base):  # type: ignore
@@ -35,6 +60,7 @@ class MetaVariableModel(Base):  # type: ignore
     title = Column(String)
     description = Column(String)
     sources = Column(String)
+    # all columns from grapher table `variables`
     grapher_meta = Column(String)
     unit = Column(String)
     short_unit = Column(String)

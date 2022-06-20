@@ -141,7 +141,22 @@ def metadata_for_variable(variable_id: int):
     # TODO: data is fetched from grapher DB, but it will be eventally fetched from catalog
     q = """
     SELECT
-        variables.*,
+        variables.id,
+        variables.name,
+        variables.unit,
+        variables.description,
+        variables.createdAt,
+        variables.updatedAt,
+        variables.code,
+        variables.coverage,
+        variables.timespan,
+        variables.datasetId,
+        variables.sourceId,
+        variables.shortUnit,
+        variables.display,
+        variables.columnOrder,
+        variables.originalMetadata,
+        variables.grapherConfig,
         datasets.name AS datasetName,
         datasets.nonRedistributable AS nonRedistributable,
         sources.name AS sourceName,

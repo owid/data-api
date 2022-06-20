@@ -1,13 +1,13 @@
 import json
 import urllib.error
 from pathlib import Path
-from typing import Any, Dict, cast, List
+from typing import Any, Dict, cast, List, Tuple, Set
 
 import pandas as pd
 import structlog
 import typer
-from duckdb_models import MetaTableModel, MetaVariableModel, db_init
-from owid.catalog import RemoteCatalog, Table
+from duckdb_models import MetaTableModel, MetaDatasetModel, MetaVariableModel, db_init
+from owid.catalog import RemoteCatalog, Table, DatasetMeta, VariableMeta
 from owid.catalog.catalogs import CatalogFrame, CatalogSeries
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm.session import Session
@@ -42,11 +42,6 @@ def _load_table_data_into_db(t: CatalogSeries, table: Table, table_db_name: str,
         shape=table.shape,
     )
 
-    # TODO: remove these comments once we make sure we're able to parse large files
-    # if size_mb >= 10:
-    #     log.info("skipping_large_table", path=table_path)
-    #     continue
-
     df = pd.DataFrame(table).reset_index()
 
     # duckdb does not support NaN in categories
@@ -73,7 +68,9 @@ def _variable_types(con, table_name) -> dict:
     return mf.set_index("name")["type"].to_dict()
 
 
-def _tables_sync_actions(engine, frame):
+def _tables_sync_actions(
+    engine: Engine, frame: CatalogFrame
+) -> Tuple[Set[str], Set[str]]:
     q = """
     select
         path,
@@ -101,19 +98,30 @@ def _tables_sync_actions(engine, frame):
 
 
 def _parse_meta_variable(
-    v: dict,
+    var_meta: VariableMeta,
     short_name: str,
     variable_type: str,
     table_db_name: str,
     table_path: str,
     engine: Engine,
 ) -> MetaVariableModel:
-    v["grapher_meta"] = v.pop("additional_info", {}).get("grapher_meta", {})
-    v["variable_id"] = v["grapher_meta"].get("id")
-    v["short_name"] = short_name
-    v["table_path"] = table_path
-    v["table_db_name"] = table_db_name
-    v["variable_type"] = variable_type
+    assert var_meta.additional_info
+    v = dict(
+        title=var_meta.title,
+        description=var_meta.description,
+        sources=var_meta.sources,
+        licenses=var_meta.licenses,
+        unit=var_meta.unit,
+        short_unit=var_meta.short_unit,
+        display=var_meta.display,
+        grapher_meta=var_meta.additional_info["grapher_meta"],
+        # TODO: refactor these custom attributes
+        short_name=short_name,
+        table_path=table_path,
+        table_db_name=table_db_name,
+        variable_type=variable_type,
+    )
+    v["variable_id"] = v["grapher_meta"].get("id")  # type: ignore
 
     # TODO: we end up with lot of duplicates across variables (especially for the huge backported datasets)
     #   how about we only do it for every dataset? (we'd be returning even years for which the given variable
@@ -148,14 +156,39 @@ def _parse_meta_variable(
     return MetaVariableModel(**_omit_nullable_values(v))
 
 
-def _delete_table(table_path: str, session: Session) -> None:
+def _delete_tables(table_path: str, session: Session) -> None:
     session.query(MetaTableModel).filter_by(path=table_path).delete()
     session.query(MetaVariableModel).filter_by(table_path=table_path).delete()
 
 
-def main(duckdb_path: Path = Path("duck.db"), dataset_id: List[int] = []) -> None:
+def _upsert_dataset(ds: DatasetMeta, session: Session) -> None:
+    """Update dataset in DB."""
+    assert ds.additional_info
+
+    session.query(MetaDatasetModel).filter_by(short_name=ds.short_name).delete()
+    session.commit()
+    d = MetaDatasetModel(
+        short_name=ds.short_name,
+        namespace=ds.namespace,
+        title=ds.title,
+        description=ds.description,
+        sources=ds.sources,
+        licenses=ds.licenses,
+        is_public=ds.is_public,
+        source_checksum=ds.source_checksum,
+        grapher_meta=json.dumps(ds.additional_info["grapher_meta"]),
+        version=ds.version,
+    )
+    session.add(d)
+    session.commit()
+
+
+def main(
+    duckdb_path: Path = Path("duck.db"), dataset_id: List[int] = [], force: bool = False
+) -> None:
     """Bake ETL catalog into DuckDB."""
     engine = db_init(duckdb_path)
+
     session = Session(bind=engine)
 
     frame = _load_catalog_frame(channels=("backport",))
@@ -164,8 +197,13 @@ def main(duckdb_path: Path = Path("duck.db"), dataset_id: List[int] = []) -> Non
         all_ids = frame.dataset.str.extract("dataset_(\d+)_", expand=False).astype(int)
         frame = frame.loc[all_ids.isin(dataset_id)]
 
-    # which tables to delete and which to create
-    table_paths_to_delete, table_paths_to_create = _tables_sync_actions(engine, frame)
+    if force:
+        table_paths_to_delete = table_paths_to_create = set(frame.path)
+    else:
+        # which tables to delete and which to create
+        table_paths_to_delete, table_paths_to_create = _tables_sync_actions(
+            engine, frame
+        )
 
     # if using specific dataset ids, don't delete any other datasets
     if dataset_id:
@@ -209,12 +247,15 @@ def main(duckdb_path: Path = Path("duck.db"), dataset_id: List[int] = []) -> Non
                     path=t.path,
                 )
                 continue
+            else:
+                raise e
 
         log.info("table.download.end", path=t.path)
 
         # delete table and variables if they exist
         if t.path in table_paths_to_delete:
-            _delete_table(t.path, session)
+            _delete_tables(t.path, session)
+            session.commit()
             table_paths_to_delete.remove(t.path)
 
         # TODO: this could be autocomputed property on the model
@@ -223,14 +264,25 @@ def main(duckdb_path: Path = Path("duck.db"), dataset_id: List[int] = []) -> Non
         #   for non-unique table names?
         t["table_db_name"] = t.path.replace("/", "__")
 
+        # save dataset metadata alongside table, we could also create a separate table for datasets
+        ds = table.metadata.dataset
+        assert ds is not None
+
         m = MetaTableModel(**t)
         session.add(m)
+        # NOTE: without this commit table does not get created, not sure where the problem is (duckdb-engine is not very stable)
+        #   ideally we'd have just a single .commit at the very end
+        session.commit()
+
+        # update dataset by deleting and recreating new one
+        _upsert_dataset(ds, session)
+        session.commit()
 
         # load data into DuckDB
         _load_table_data_into_db(t, table, t["table_db_name"], engine)
 
         # get variable types from DB
-        # TODO: we could get it easily from `table`
+        # TODO: we could get it easily from `table`, but perhaps it is better from DB?
         variable_types = _variable_types(engine, t["table_db_name"])
 
         # table with variables
@@ -239,8 +291,7 @@ def main(duckdb_path: Path = Path("duck.db"), dataset_id: List[int] = []) -> Non
                 continue
 
             m = _parse_meta_variable(
-                # TODO: use VariableMeta directly
-                variable_meta.to_dict(),
+                variable_meta,
                 variable_short_name,
                 variable_types[variable_short_name],
                 t["table_db_name"],
@@ -249,14 +300,15 @@ def main(duckdb_path: Path = Path("duck.db"), dataset_id: List[int] = []) -> Non
             )
             session.add(m)
 
-        # commit changes for one table
+        # commit changes for variables
         session.commit()
 
     # delete the rest of the tables
     if table_paths_to_delete:
         log.info("table.delete_tables", n=len(table_paths_to_delete))
         for table_path in table_paths_to_delete:
-            _delete_table(table_path, session)
+            _delete_tables(table_path, session)
+        session.commit()
 
     session.close()
 
