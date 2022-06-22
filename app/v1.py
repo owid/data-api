@@ -137,43 +137,61 @@ def _get_dimensions():
 )
 def metadata_for_variable(variable_id: int):
     """Fetch metadata for a single variable from database."""
-    # TODO: data is fetched from grapher DB, but it will be eventally fetched from catalog
     q = """
     SELECT
-        variables.id,
-        variables.name,
-        variables.unit,
-        variables.description,
-        variables.createdAt,
-        variables.updatedAt,
-        variables.code,
-        variables.coverage,
-        variables.timespan,
-        variables.datasetId,
-        variables.sourceId,
-        variables.shortUnit,
-        variables.display,
-        variables.columnOrder,
-        variables.originalMetadata,
-        variables.grapherConfig,
-        datasets.name AS datasetName,
-        datasets.nonRedistributable AS nonRedistributable,
-        sources.name AS sourceName,
-        sources.description AS sourceDescription
-    FROM variables
-    JOIN datasets ON variables.datasetId = datasets.id
-    JOIN sources ON variables.sourceId = sources.id
-    WHERE variables.id = %(variable_id)s
+        -- variables
+        v.grapher_meta->>'$.id' as id,
+        v.grapher_meta->>'$.name' as name,
+        v.grapher_meta->>'$.unit' as unit,
+        v.grapher_meta->>'$.description' as description,
+        v.grapher_meta->>'$.createdAt' as createdAt,
+        v.grapher_meta->>'$.updatedAt' as updatedAt,
+        v.grapher_meta->>'$.code' as code,
+        v.grapher_meta->>'$.coverage' as coverage,
+        v.grapher_meta->>'$.timespan' as timespan,
+        v.grapher_meta->>'$.datasetId' as datasetId,
+        v.grapher_meta->>'$.sourceId' as sourceId,
+        v.grapher_meta->>'$.shortUnit' as shortUnit,
+        v.grapher_meta->>'$.display' as display,
+        v.grapher_meta->>'$.columnOrder' as columnOrder,
+        v.grapher_meta->>'$.originalMetadata' as originalMetadata,
+        v.grapher_meta->>'$.grapherConfig' as grapherConfig,
+        -- dataset
+        d.grapher_meta->>'$.name' as datasetName,
+        d.grapher_meta->>'$.nonRedistributable' as nonRedistributable,
+        -- there should be always only one source for variable
+        -- this is inverse of `convert_grapher_source`
+        v.sources->>'$[0].name' as sourceName,
+        v.sources->>'$[0].description' as sourceAdditionalInfo,
+        v.sources->>'$[0].date_accessed' as sourceRetrievedDate,
+        v.sources->>'$[0].url' as sourceLink,
+        v.sources->>'$[0].publisher_source' as sourceDataPublisherSource,
+        v.sources->>'$[0].published_by' as sourceDataPublishedBy,
+
+
+    FROM meta_variables as v
+    JOIN meta_datasets as d ON d.short_name = v.dataset_short_name
+    -- JOIN sources ON v.sourceId = sources.id
+    WHERE v.variable_id = (?)
     """
-    df = pd.read_sql(q, engine, params={"variable_id": variable_id})
+    con = get_readonly_connection(threading.get_ident())
+
+    # TODO: this is a hacky and slow way to do it, use ORM or proper dataclass instead
+    df = cast(pd.DataFrame, con.execute(q, parameters=[variable_id]).fetch_df())
     row = df.iloc[0].to_dict()
 
-    sourceId = row.pop("sourceId")
-    sourceName = row.pop("sourceName")
-    sourceDescription = row.pop("sourceDescription")
+    source = VariableSource(
+        id=row.pop("sourceId"),
+        name=row.pop("sourceName"),
+        dataPublishedBy=row.pop("sourceDataPublishedBy", ""),
+        dataPublisherSource=row.pop("sourceDataPublisherSource", ""),
+        link=row.pop("sourceLink", ""),
+        retrievedDate=row.pop("sourceRetrievedDate", ""),
+        additionalInfo=row.pop("sourceAdditionalInfo", ""),
+    )
+
     nonRedistributable = row.pop("nonRedistributable")
     displayJson = row.pop("display")
-    partialSource = json.loads(sourceDescription)
     variable = omit_nullable_values(row)
 
     # omit `id`, this should be explicit from the query rather than calling `variables.*`
@@ -186,15 +204,7 @@ def metadata_for_variable(variable_id: int):
     return VariableMetadataResponse(
         nonRedistributable=bool(nonRedistributable),
         display=json.loads(displayJson),
-        source=VariableSource(
-            id=sourceId,
-            name=sourceName,
-            dataPublishedBy=partialSource["dataPublishedBy"] or "",
-            dataPublisherSource=partialSource["dataPublisherSource"] or "",
-            link=partialSource["link"] or "",
-            retrievedDate=partialSource["retrievedDate"] or "",
-            additionalInfo=partialSource["additionalInfo"] or "",
-        ),
+        source=source,
         type=variable_type,
         dimensions=dimensions,
         **variable,
