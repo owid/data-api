@@ -103,13 +103,15 @@ def _parse_meta_variable(
     variable_type: str,
     table_db_name: str,
     table_path: str,
+    dataset_short_name: str,
     engine: Engine,
 ) -> MetaVariableModel:
     assert var_meta.additional_info
     v = dict(
         title=var_meta.title,
         description=var_meta.description,
-        sources=var_meta.sources,
+        # TODO: how to convert the entire `VariableMeta` object to JSON/dict?
+        sources=[s.to_dict() for s in var_meta.sources],
         licenses=var_meta.licenses,
         unit=var_meta.unit,
         short_unit=var_meta.short_unit,
@@ -120,6 +122,7 @@ def _parse_meta_variable(
         table_path=table_path,
         table_db_name=table_db_name,
         variable_type=variable_type,
+        dataset_short_name=dataset_short_name,
     )
     v["variable_id"] = v["grapher_meta"].get("id")  # type: ignore
 
@@ -146,6 +149,7 @@ def _parse_meta_variable(
     v["entities_values"] = json.dumps(mf.to_dict(orient="list"))
 
     v["sources"] = json.dumps(v.get("sources", []))
+    v["licenses"] = json.dumps(v.get("licenses", []))
     v["grapher_meta"] = json.dumps(v.get("grapher_meta", {}))
     v["display"] = json.dumps(v.get("display", {}))
 
@@ -267,6 +271,7 @@ def main(
         # save dataset metadata alongside table, we could also create a separate table for datasets
         ds = table.metadata.dataset
         assert ds is not None
+        assert ds.short_name
 
         m = MetaTableModel(**t)
         session.add(m)
@@ -296,6 +301,7 @@ def main(
                 variable_types[variable_short_name],
                 t["table_db_name"],
                 t["path"],
+                ds.short_name,
                 engine,
             )
             session.add(m)

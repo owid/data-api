@@ -56,9 +56,11 @@ class MetaVariableModel(Base):  # type: ignore
     short_name = Column(String)
     table_path = Column(String)
     table_db_name = Column(String)
+    dataset_short_name = Column(String)
     variable_type = Column(String)
     title = Column(String)
     description = Column(String)
+    licenses = Column(String)
     sources = Column(String)
     # all columns from grapher table `variables`
     grapher_meta = Column(String)

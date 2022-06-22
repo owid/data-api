@@ -9,7 +9,6 @@ import structlog
 from fastapi import FastAPI, HTTPException
 
 from app.core.config import settings
-from app.database import engine
 from app.schemas.v1 import (
     Dimension,
     DimensionProperties,
