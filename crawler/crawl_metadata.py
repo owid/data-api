@@ -173,6 +173,7 @@ def _upsert_dataset(ds: DatasetMeta, session: Session) -> None:
 
     session.query(MetaDatasetModel).filter_by(short_name=ds.short_name).delete()
     session.commit()
+    # TODO: this could be method `MetaDatasetModel.from_DatasetMeta`
     d = MetaDatasetModel(
         short_name=ds.short_name,
         namespace=ds.namespace,
@@ -229,14 +230,7 @@ def main(
         t = cast(CatalogSeries, t)
 
         missing_dims = REQUIRED_DIMENSIONS - set(t["dimensions"])
-        # TODO: this should raise an error, but we need to be deleting zombie data first
-        # assert not missing_dims, f"Missing dimensions: {missing_dims}"
-        if missing_dims:
-            log.warning(
-                "table.missing_dimensions",
-                path=t.path,
-            )
-            continue
+        assert not missing_dims, f"Missing dimensions: {missing_dims}"
 
         # download data and metadata from remote catalog
         log.info("table.download.start", path=t.path)
@@ -256,40 +250,40 @@ def main(
 
         log.info("table.download.end", path=t.path)
 
-        # delete table and variables if they exist
-        if t.path in table_paths_to_delete:
-            with new_session(engine) as session:
-                _delete_tables(t.path, session)
-            table_paths_to_delete.remove(t.path)
-
-        # rename some columns to match DuckDB schema
-        t = t.rename(
-            {
-                "table": "table_name",
-                "dataset": "dataset_name",
-            }
-        )
-
-        # save dataset metadata alongside table, we could also create a separate table for datasets
-        ds = table.metadata.dataset
-        assert ds is not None
-        assert ds.short_name
-
         with new_session(engine) as session:
+
+            # delete table and variables if they exist
+            if t.path in table_paths_to_delete:
+                with new_session(engine) as session:
+                    _delete_tables(t.path, session)
+                table_paths_to_delete.remove(t.path)
+
+            # rename some columns to match DuckDB schema
+            t = t.rename(
+                {
+                    "table": "table_name",
+                    "dataset": "dataset_name",
+                }
+            )
+
+            # save dataset metadata alongside table, we could also create a separate table for datasets
+            ds = table.metadata.dataset
+            assert ds is not None
+            assert ds.short_name
+
             m = MetaTableModel(**t.to_dict())
             session.add(m)
 
             # update dataset by deleting and recreating new one
             _upsert_dataset(ds, session)
 
-        # load data into DuckDB
-        _load_table_data_into_db(m, table, engine)
+            # load data into DuckDB
+            _load_table_data_into_db(m, table, engine)
 
-        # get variable types from DB
-        # TODO: we could get it easily from `table`, but perhaps it is better from DB?
-        variable_types = _variable_types(engine, m.table_db_name)
+            # get variable types from DB
+            # TODO: we could get it easily from `table`, but perhaps it is better from DB?
+            variable_types = _variable_types(engine, m.table_db_name)
 
-        with new_session(engine) as session:
             # table with variables
             for variable_short_name, variable_meta in table._fields.items():
                 if variable_short_name in REQUIRED_DIMENSIONS:
@@ -307,12 +301,10 @@ def main(
                     "table.variable.create", path=m.path, variable=variable_short_name
                 )
                 session.add(v)
-                break
 
-    # delete the rest of the tables
-    if table_paths_to_delete:
-        log.info("table.delete_tables", n=len(table_paths_to_delete))
-        with new_session(engine) as session:
+        # delete the rest of the tables
+        if table_paths_to_delete:
+            log.info("table.delete_tables", n=len(table_paths_to_delete))
             for table_path in table_paths_to_delete:
                 _delete_tables(table_path, session)
 
@@ -325,6 +317,8 @@ def new_session(engine) -> Generator[Session, None, None]:
     unknown reasons), so I'm creating new session for each operation which works. Feel free to fix
     this and make it transactional or switch to a different ORM.
     """
+    # NOTE: should I do it with transaction, i.e. `with session.begin():`?
+    #   there would be problems with commits in _upsert_dataset
     with Session(engine, expire_on_commit=False) as session:
         yield session
         session.commit()
