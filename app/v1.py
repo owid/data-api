@@ -4,6 +4,7 @@ import threading
 from typing import cast
 
 import duckdb
+import numpy as np
 import pandas as pd
 import structlog
 from fastapi import FastAPI, HTTPException
@@ -89,7 +90,7 @@ def data_for_variable(variable_id: int, limit: int = 1000000000):
 
 
 def omit_nullable_values(d: dict) -> dict:
-    return {k: v for k, v in d.items() if v is not None}
+    return {k: v for k, v in d.items() if v is not None and not pd.isna(v)}
 
 
 def _get_dimensions():
@@ -136,11 +137,12 @@ def _get_dimensions():
     response_model_exclude_unset=True,
 )
 def metadata_for_variable(variable_id: int):
-    """Fetch metadata for a single variable from database."""
+    """Fetch metadata for a single variable from database.
+    This function is identical to Variables.getVariableData in owid-grapher repository
+    """
     q = """
     SELECT
         -- variables
-        v.grapher_meta->>'$.id' as id,
         v.grapher_meta->>'$.name' as name,
         v.grapher_meta->>'$.unit' as unit,
         v.grapher_meta->>'$.description' as description,
@@ -149,16 +151,16 @@ def metadata_for_variable(variable_id: int):
         v.grapher_meta->>'$.code' as code,
         v.grapher_meta->>'$.coverage' as coverage,
         v.grapher_meta->>'$.timespan' as timespan,
-        v.grapher_meta->>'$.datasetId' as datasetId,
-        v.grapher_meta->>'$.sourceId' as sourceId,
+        (v.grapher_meta->>'$.datasetId')::integer as datasetId,
+        (v.grapher_meta->>'$.sourceId')::integer as sourceId,
         v.grapher_meta->>'$.shortUnit' as shortUnit,
         v.grapher_meta->>'$.display' as display,
-        v.grapher_meta->>'$.columnOrder' as columnOrder,
+        (v.grapher_meta->>'$.columnOrder')::integer as columnOrder,
         v.grapher_meta->>'$.originalMetadata' as originalMetadata,
         v.grapher_meta->>'$.grapherConfig' as grapherConfig,
         -- dataset
         d.grapher_meta->>'$.name' as datasetName,
-        d.grapher_meta->>'$.nonRedistributable' as nonRedistributable,
+        IF(d.grapher_meta->>'$.nonRedistributable' = 'true', true, false) as nonRedistributable,
         -- there should be always only one source for variable
         -- this is inverse of `convert_grapher_source`
         v.sources->>'$[0].name' as sourceName,
@@ -167,17 +169,17 @@ def metadata_for_variable(variable_id: int):
         v.sources->>'$[0].url' as sourceLink,
         v.sources->>'$[0].publisher_source' as sourceDataPublisherSource,
         v.sources->>'$[0].published_by' as sourceDataPublishedBy,
-
-
     FROM meta_variables as v
     JOIN meta_datasets as d ON d.short_name = v.dataset_short_name
-    -- JOIN sources ON v.sourceId = sources.id
     WHERE v.variable_id = (?)
     """
     con = get_readonly_connection(threading.get_ident())
 
     # TODO: this is a hacky and slow way to do it, use ORM or proper dataclass instead
     df = cast(pd.DataFrame, con.execute(q, parameters=[variable_id]).fetch_df())
+
+    # null values in JSON string functions end up as "null" string, fix that
+    df = df.replace("null", np.nan)
     row = df.iloc[0].to_dict()
 
     source = VariableSource(
@@ -193,9 +195,6 @@ def metadata_for_variable(variable_id: int):
     nonRedistributable = row.pop("nonRedistributable")
     displayJson = row.pop("display")
     variable = omit_nullable_values(row)
-
-    # omit `id`, this should be explicit from the query rather than calling `variables.*`
-    variable.pop("id")
 
     # NOTE: getting these is a bit of a pain, we have a lot of duplicate information
     # in our DB

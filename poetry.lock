@@ -258,7 +258,7 @@ numpy = ">=1.14"
 
 [[package]]
 name = "duckdb-engine"
-version = "0.1.8"
+version = "0.1.11"
 description = ""
 category = "main"
 optional = false
@@ -1273,7 +1273,7 @@ python-versions = "*"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.9"
-content-hash = "6fae51769d3a34bbab7de397840fd2f68fd882b963ffefe0062d7d491f84cad2"
+content-hash = "12b207a9de4f549b9b4935564d0bcdcc1c311e655c3f018697ed50e06be0d7a9"
 
 [metadata.files]
 appnope = [
@@ -1528,8 +1528,8 @@ duckdb = [
     {file = "duckdb-0.3.4.tar.gz", hash = "sha256:ab94cfc9e4c25f93d4a7be2063879475c308d771d53588bfd6198a89a8c2bcd2"},
 ]
 duckdb-engine = [
-    {file = "duckdb_engine-0.1.8-py3-none-any.whl", hash = "sha256:308c1318b1b526a5d89be2c7b3da748a4189aae4916151fd3ade65611377fbec"},
-    {file = "duckdb_engine-0.1.8.tar.gz", hash = "sha256:08688e92e0c872e498f4f7bddec252fc0368bbc5b67028fab608ffdcd3d9197a"},
+    {file = "duckdb_engine-0.1.11-py3-none-any.whl", hash = "sha256:8721775c71300b0b01350429e8727940e03a09e530c91b18861eb6b1d2d8cb1b"},
+    {file = "duckdb_engine-0.1.11.tar.gz", hash = "sha256:d958fa32b2f239616416431d474d7a2135fd444b5001339cbe99b868b79ccf50"},
 ]
 entrypoints = [
     {file = "entrypoints-0.4-py3-none-any.whl", hash = "sha256:f174b5ff827504fd3cd97cc3f8649f3693f51538c7e4bdf3ef002c8429d42f9f"},

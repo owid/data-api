@@ -67,8 +67,8 @@ class Dimensions(BaseModel):
 class VariableMetadataResponse(BaseModel):
     name: str
     unit: str
-    shortUnit: str
-    code: str
+    shortUnit: Optional[str]
+    code: Optional[str]
     description: str
     createdAt: dt.datetime
     updatedAt: dt.datetime
@@ -79,8 +79,8 @@ class VariableMetadataResponse(BaseModel):
     datasetName: str
     nonRedistributable: bool
     display: VariableDisplay
-    originalMetadata: str
-    grapherConfig: str
+    originalMetadata: Optional[str]
+    grapherConfig: Optional[str]
     # MAYBE CHANGE - this should be turned into an array
     source: VariableSource
     type: str

@@ -14,26 +14,29 @@ class MetaDatasetModel(Base):  # type: ignore
 
     __tablename__ = "meta_datasets"
 
-    short_name = Column(String, primary_key=True)
     namespace = Column(String)
+    short_name = Column(String, primary_key=True)
     title = Column(String)
     description = Column(String)
     sources = Column(String)
     licenses = Column(String)
     is_public = Column(Boolean)
     source_checksum = Column(String)
-    grapher_meta = Column(String)
     version = Column(String)
+
+    # this is an attribute of additional_info['grapher_meta']
+    grapher_meta = Column(String)
 
 
 class MetaTableModel(Base):  # type: ignore
     __tablename__ = "meta_tables"
 
-    # TODO: might be better to use ids as primary key instead of name
-    # table name
-    table = Column(String, primary_key=True)
-    # dataset name
-    dataset = Column(String)
+    # TODO: might be better to use ids as primary key instead of name?
+    table_name = Column(String, primary_key=True)
+    dataset_name = Column(String)
+    table_db_name = Column(String)
+
+    # columns from catalog
     version = Column(String)
     namespace = Column(String)
     channel = Column(String)
@@ -41,32 +44,41 @@ class MetaTableModel(Base):  # type: ignore
     dimensions = Column(String)
     path = Column(String)
     format = Column(String)
-    table_db_name = Column(String)
     is_public = Column(Boolean)
-    # dataset metadata
-    # TODO: create its own table with grapher_meta table
-    dataset_meta = Column(String)
+
+    def __init__(self, *args, **kwargs):
+        # TODO: path could be very long, but how do we guarantee uniqueness of table name
+        #   across datasets? or should we just go with table name and use full path only
+        #   for non-unique table names?
+        kwargs["table_db_name"] = kwargs["path"].replace("/", "__")
+        super().__init__(*args, **kwargs)
 
 
 class MetaVariableModel(Base):  # type: ignore
     __tablename__ = "meta_variables"
 
+    # columns from VariableMeta
+    title = Column(String)
+    description = Column(String)
+    licenses = Column(String)
+    sources = Column(String)
+    unit = Column(String)
+    short_unit = Column(String)
+    display = Column(String)
+
+    # this is an attribute of additional_info['grapher_meta']
+    grapher_meta = Column(String)
+
     # NOTE: Sequence is needed for duckdb integer primary keys
     variable_id = Column(Integer, Sequence("fakemodel_id_sequence"), primary_key=True)
+
+    # inferred columns by crawler
     short_name = Column(String)
     table_path = Column(String)
     table_db_name = Column(String)
     dataset_short_name = Column(String)
     variable_type = Column(String)
-    title = Column(String)
-    description = Column(String)
-    licenses = Column(String)
-    sources = Column(String)
-    # all columns from grapher table `variables`
-    grapher_meta = Column(String)
-    unit = Column(String)
-    short_unit = Column(String)
-    display = Column(String)
+
     # distinct values of years and entities encoded as JSON
     years_values = Column(String)
     entities_values = Column(String)

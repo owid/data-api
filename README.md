@@ -35,5 +35,6 @@ Docs are available at http://127.0.0.1:8000/v1/docs.
 Integration tests work with sample data saved in `tests/sample_duck.db`. Regenerate it with
 
 ```
-rm tests/sample_duck.db; python crawler/crawl_metadata.py --dataset-id 941 --duckdb-path tests/sample_duck.db
+rm tests/sample_duck.db
+python crawler/crawl_metadata.py --dataset-id 941 --duckdb-path tests/sample_duck.db
 ```

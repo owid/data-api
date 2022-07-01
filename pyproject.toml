@@ -16,7 +16,7 @@ owid-catalog = "^0.2.9"
 rich = "^12.4.4"
 typer = "^0.4.1"
 duckdb = "^0.3.4"
-duckdb-engine = "^0.1.8"
+duckdb-engine = "^0.1.11"
 
 [tool.poetry.dev-dependencies]
 pytest = "^5.2"
