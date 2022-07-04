@@ -1,23 +1,29 @@
 import json
 import urllib.error
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, cast, List, Tuple, Set
+from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
 import pandas as pd
-from collections.abc import Generator
 import structlog
 import typer
-from duckdb_models import MetaTableModel, MetaDatasetModel, MetaVariableModel, db_init
-from owid.catalog import RemoteCatalog, Table, DatasetMeta, VariableMeta
+from duckdb_models import (
+    MetaDatasetModel,
+    MetaTableModel,
+    MetaVariableModel,
+    db_init,
+)
+from owid.catalog import DatasetMeta, RemoteCatalog, Table, VariableMeta
 from owid.catalog.catalogs import CatalogFrame, CatalogSeries
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm.session import Session
 
-from contextlib import contextmanager
-
-REQUIRED_DIMENSIONS = {"year", "entity_name", "entity_code", "entity_id"}
-
 log = structlog.get_logger()
+
+
+# duckdb does not support NaN in categories, use a special symbol instead
+CATEGORY_NAN = "-"
 
 
 def _load_catalog_frame(channels=()) -> CatalogFrame:
@@ -35,6 +41,13 @@ def _omit_nullable_values(d: dict) -> dict:
     return {k: v for k, v in d.items() if v or v == 0}
 
 
+def _fillna_for_categories(df: pd.DataFrame) -> pd.DataFrame:
+    for col in df.select_dtypes("category").columns:
+        if df[col].isnull().any():
+            df[col] = df[col].cat.add_categories(CATEGORY_NAN).fillna(CATEGORY_NAN)
+    return df
+
+
 def _load_table_data_into_db(m: MetaTableModel, table: Table, con):
     table_path = m.path
     # size_mb = table_path.stat().st_size / 1e6
@@ -47,8 +60,7 @@ def _load_table_data_into_db(m: MetaTableModel, table: Table, con):
 
     df = pd.DataFrame(table).reset_index()
 
-    # duckdb does not support NaN in categories
-    df.entity_code = df.entity_code.cat.add_categories("-").fillna("-")
+    df = _fillna_for_categories(df)
 
     # unsigned integers are not supported, convert them to signed with higher range
     # NOTE: this a workaround, it worked with loading from feather object, but it does
@@ -108,25 +120,26 @@ def _parse_meta_variable(
     dataset_short_name: str,
     engine: Engine,
 ) -> MetaVariableModel:
-    assert var_meta.additional_info
-    v = dict(
+    v = MetaVariableModel(
         title=var_meta.title,
         description=var_meta.description,
-        # TODO: how to convert the entire `VariableMeta` object to JSON/dict?
-        sources=[s.to_dict() for s in var_meta.sources],
-        licenses=var_meta.licenses,
+        licenses=json.dumps([l.to_dict() for l in var_meta.licenses]),
+        sources=json.dumps([s.to_dict() for s in var_meta.sources]),
         unit=var_meta.unit,
         short_unit=var_meta.short_unit,
-        display=var_meta.display,
-        grapher_meta=var_meta.additional_info["grapher_meta"],
-        # TODO: refactor these custom attributes
+        display=json.dumps(var_meta.display),
+        grapher_meta=json.dumps(var_meta.additional_info["grapher_meta"])
+        if var_meta.additional_info
+        else None,
+        variable_id=var_meta.additional_info["grapher_meta"]["id"]
+        if var_meta.additional_info
+        else None,
         short_name=short_name,
         table_path=m.path,
         table_db_name=m.table_db_name,
         variable_type=variable_type,
         dataset_short_name=dataset_short_name,
     )
-    v["variable_id"] = v["grapher_meta"].get("id")  # type: ignore
 
     # TODO: we end up with lot of duplicates across variables (especially for the huge backported datasets)
     #   how about we only do it for every dataset? (we'd be returning even years for which the given variable
@@ -136,7 +149,7 @@ def _parse_meta_variable(
     select distinct year from {m.table_db_name} where {short_name} is not null
     """
     mf = pd.read_sql(q, engine)
-    v["years_values"] = json.dumps(mf.year.tolist())
+    v.years_values = json.dumps(mf.year.tolist())
 
     # entities_values
     # NOTE: `read_sql` does not support categorical type, so we have to convert to varchar
@@ -148,18 +161,9 @@ def _parse_meta_variable(
     from {m.table_db_name} where {short_name} is not null
     """
     mf = pd.read_sql(q, engine)
-    v["entities_values"] = json.dumps(mf.to_dict(orient="list"))
+    v.entities_values = json.dumps(mf.to_dict(orient="list"))
 
-    v["sources"] = json.dumps(v.get("sources", []))
-    v["licenses"] = json.dumps(v.get("licenses", []))
-    v["grapher_meta"] = json.dumps(v.get("grapher_meta", {}))
-    v["display"] = json.dumps(v.get("display", {}))
-
-    # assert that we don't have any extra columns
-    extra_keys = v.keys() - set(MetaVariableModel._sa_class_manager.keys())
-    assert not extra_keys, f"Extra keys {extra_keys}"
-
-    return MetaVariableModel(**_omit_nullable_values(v))
+    return v
 
 
 def _delete_tables(table_path: str, session: Session) -> None:
@@ -169,39 +173,17 @@ def _delete_tables(table_path: str, session: Session) -> None:
 
 def _upsert_dataset(ds: DatasetMeta, session: Session) -> None:
     """Update dataset in DB."""
-    assert ds.additional_info
-
     session.query(MetaDatasetModel).filter_by(short_name=ds.short_name).delete()
     session.commit()
     # TODO: this could be method `MetaDatasetModel.from_DatasetMeta`
-    d = MetaDatasetModel(
-        short_name=ds.short_name,
-        namespace=ds.namespace,
-        title=ds.title,
-        description=ds.description,
-        sources=ds.sources,
-        licenses=ds.licenses,
-        is_public=ds.is_public,
-        source_checksum=ds.source_checksum,
-        grapher_meta=json.dumps(ds.additional_info["grapher_meta"]),
-        version=ds.version,
-    )
+    d = MetaDatasetModel.from_DatasetMeta(ds)
     session.add(d)
     session.commit()
 
 
-def main(
-    duckdb_path: Path = Path("duck.db"), dataset_id: List[int] = [], force: bool = False
-) -> None:
-    """Bake ETL catalog into DuckDB."""
-    engine = db_init(duckdb_path)
-
-    frame = _load_catalog_frame(channels=("backport",))
-
-    if dataset_id:
-        all_ids = frame.dataset.str.extract("dataset_(\d+)_", expand=False).astype(int)
-        frame = frame.loc[all_ids.isin(dataset_id)]
-
+def _tables_updates(
+    engine: Engine, frame: CatalogFrame, force: bool, include: Optional[str]
+) -> Tuple[Set[str], Set[str]]:
     if force:
         table_paths_to_delete = table_paths_to_create = set(frame.path)
     else:
@@ -210,10 +192,50 @@ def main(
             engine, frame
         )
 
-    # if using specific dataset ids, don't delete any other datasets
-    if dataset_id:
+    # if using specific include pattern, don't delete any other datasets
+    if include:
         table_paths_to_delete = table_paths_to_delete & table_paths_to_create
 
+    return table_paths_to_delete, table_paths_to_create
+
+
+def _load_data_from_catalog(catalog_row: CatalogSeries) -> Table:
+    log.info("table.download.start", path=catalog_row["path"])
+    try:
+        data_table = catalog_row.load()
+    except urllib.error.HTTPError as e:
+        # TODO: this should happen very rarely only if data is not synced with catalog
+        # we should raise an exception once we turn on backporting and make it fast enough
+        assert (
+            e.code != 403
+        ), f"Dataset {catalog_row['path']} is private and returning 403"
+        raise e
+
+    log.info("table.download.end", path=catalog_row["path"])
+    return data_table
+
+
+def main(
+    duckdb_path: Path = Path("duck.db"),
+    include: Optional[str] = typer.Option(
+        None, help="Include datasets matching this regex"
+    ),
+    force: bool = False,
+) -> None:
+    """Bake ETL catalog into DuckDB."""
+    engine = db_init(duckdb_path)
+
+    frame = _load_catalog_frame(channels=("backport", "garden"))
+
+    # TODO: hotfix, remove after we fix this in ETL
+    frame = cast(CatalogFrame, frame.dropna(subset=["dataset"]))
+
+    if include:
+        frame = frame.loc[frame.dataset.str.match(include)]
+
+    table_paths_to_delete, table_paths_to_create = _tables_updates(
+        engine, frame, force, include
+    )
     log.info(
         "duckdb.actions",
         delete_tables=len(table_paths_to_delete),
@@ -222,83 +244,60 @@ def main(
 
     frame = frame.loc[frame.path.isin(table_paths_to_create)]
 
-    for i, (_, t) in enumerate(frame.iterrows()):
+    for i, (_, catalog_row) in enumerate(frame.iterrows()):
+        catalog_row = cast(CatalogSeries, catalog_row)
+
+        t = MetaTableModel.from_CatalogSeries(catalog_row)
+
         log.info(
-            "table.create", path=t.path, table=t.table, progress=f"{i + 1}/{len(frame)}"
+            "table.create",
+            path=t.path,
+            table_name=t.table_name,
+            progress=f"{i + 1}/{len(frame)}",
         )
 
-        t = cast(CatalogSeries, t)
-
-        missing_dims = REQUIRED_DIMENSIONS - set(t["dimensions"])
-        assert not missing_dims, f"Missing dimensions: {missing_dims}"
-
-        # download data and metadata from remote catalog
-        log.info("table.download.start", path=t.path)
-        try:
-            table = t.load()
-        except urllib.error.HTTPError as e:
-            # TODO: this should happen very rarely only if data is not synced with catalog
-            # we should raise an exception once we turn on backporting and make it fast enough
-            if e.code == 403:
-                log.warning(
-                    "table.private_dataset",
-                    path=t.path,
-                )
-                continue
-            else:
-                raise e
-
-        log.info("table.download.end", path=t.path)
+        data_table = _load_data_from_catalog(catalog_row)
 
         with new_session(engine) as session:
+            # add table
+            session.add(t)
 
-            # delete table and variables if they exist
+            # delete table and variables before creating them if they exist
             if t.path in table_paths_to_delete:
                 with new_session(engine) as session:
                     _delete_tables(t.path, session)
                 table_paths_to_delete.remove(t.path)
 
-            # rename some columns to match DuckDB schema
-            t = t.rename(
-                {
-                    "table": "table_name",
-                    "dataset": "dataset_name",
-                }
-            )
-
             # save dataset metadata alongside table, we could also create a separate table for datasets
-            ds = table.metadata.dataset
+            ds = data_table.metadata.dataset
             assert ds is not None
             assert ds.short_name
-
-            m = MetaTableModel(**t.to_dict())
-            session.add(m)
 
             # update dataset by deleting and recreating new one
             _upsert_dataset(ds, session)
 
             # load data into DuckDB
-            _load_table_data_into_db(m, table, engine)
+            _load_table_data_into_db(t, data_table, engine)
 
             # get variable types from DB
             # TODO: we could get it easily from `table`, but perhaps it is better from DB?
-            variable_types = _variable_types(engine, m.table_db_name)
+            variable_types = _variable_types(engine, t.table_db_name)
 
             # table with variables
-            for variable_short_name, variable_meta in table._fields.items():
-                if variable_short_name in REQUIRED_DIMENSIONS:
+            for variable_short_name, variable_meta in data_table._fields.items():
+                if variable_short_name in t.dimensions:
                     continue
 
                 v = _parse_meta_variable(
                     variable_meta,
-                    m,
+                    t,
                     variable_short_name,
                     variable_types[variable_short_name],
                     ds.short_name,
                     engine,
                 )
                 log.info(
-                    "table.variable.create", path=m.path, variable=variable_short_name
+                    "table.variable.create", path=t.path, variable=variable_short_name
                 )
                 session.add(v)
 

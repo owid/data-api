@@ -3,10 +3,18 @@ from pathlib import Path
 from sqlalchemy import Boolean, Column, Integer, Sequence, String, create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
+import json
+from owid.catalog.catalogs import CatalogSeries
+import structlog
+from owid.catalog import DatasetMeta
 
 Base = declarative_base()
 
 
+log = structlog.get_logger()
+
+
+# NOTE: not having type hints is quite limiting, ideally we would make this work with sqlmodel
 class MetaDatasetModel(Base):  # type: ignore
     """
     Almost identical copy of DatasetMeta from owid-catalog-py
@@ -26,6 +34,23 @@ class MetaDatasetModel(Base):  # type: ignore
 
     # this is an attribute of additional_info['grapher_meta']
     grapher_meta = Column(String)
+
+    @classmethod
+    def from_DatasetMeta(cls, ds: DatasetMeta) -> "MetaDatasetModel":
+        return MetaDatasetModel(
+            short_name=ds.short_name,
+            namespace=ds.namespace,
+            title=ds.title,
+            description=ds.description,
+            sources=json.dumps([s.to_dict() for s in ds.sources]),
+            licenses=json.dumps([l.to_dict() for l in ds.licenses]),
+            is_public=ds.is_public,
+            source_checksum=ds.source_checksum,
+            grapher_meta=json.dumps(ds.additional_info["grapher_meta"])
+            if ds.additional_info
+            else None,
+            version=ds.version,
+        )
 
 
 class MetaTableModel(Base):  # type: ignore
@@ -50,8 +75,29 @@ class MetaTableModel(Base):  # type: ignore
         # TODO: path could be very long, but how do we guarantee uniqueness of table name
         #   across datasets? or should we just go with table name and use full path only
         #   for non-unique table names?
-        kwargs["table_db_name"] = kwargs["path"].replace("/", "__")
+        # NOTE: version can contain - in dates (e.g. 2020-10-01)
+        kwargs["table_db_name"] = kwargs["path"].replace("/", "__").replace("-", "_")
         super().__init__(*args, **kwargs)
+
+    @classmethod
+    def from_CatalogSeries(cls, catalog_row: CatalogSeries) -> "MetaTableModel":
+        d = catalog_row.to_dict()
+
+        # rename to adhere to DuckDB schema
+        d["table_name"] = d.pop("table")
+        d["dataset_name"] = d.pop("dataset")
+
+        t = cls(**d)
+
+        is_backport = t.channel == "backport"
+
+        if is_backport:
+            missing_dims = {"year", "entity_name", "entity_code", "entity_id"} - set(
+                t.dimensions
+            )
+            assert not missing_dims, f"Missing dimensions: {missing_dims}"
+
+        return t
 
 
 class MetaVariableModel(Base):  # type: ignore

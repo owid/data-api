@@ -36,5 +36,5 @@ Integration tests work with sample data saved in `tests/sample_duck.db`. Regener
 
 ```
 rm tests/sample_duck.db
-python crawler/crawl_metadata.py --dataset-id 941 --duckdb-path tests/sample_duck.db
+python crawler/crawl_metadata.py --include dataset_941 --duckdb-path tests/sample_duck.db
 ```
