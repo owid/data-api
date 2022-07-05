@@ -61,7 +61,7 @@ def data_for_backported_variable(variable_id: int, limit: int = 1000000000):
     con = get_readonly_connection(threading.get_ident())
 
     # get meta about variable
-    q = f"""
+    q = """
     select
         variable_id,
         short_name,
@@ -128,60 +128,41 @@ def omit_nullable_values(d: dict) -> dict:
 def _parse_dimension_values(dimension_values: Any) -> Dict[str, Dimension]:
     dimensions = {}
 
+    # NOTE: we have inconsistency with plurals - even though the dimension name is
+    # singular, we use plural in the API (but not for custom dimensions)
+    if "year" in dimension_values:
+        dimensions["years"] = Dimension(
+            type="int",
+            values=[DimensionProperties(id=y) for y in dimension_values.pop("year")],
+        )
+
     # special case of entities backported variables with entities and their codes
     if {"entity_id", "entity_name", "entity_code"} <= set(dimension_values.keys()):
         dimensions["entities"] = Dimension(
             type="int",
             values=[
                 DimensionProperties(id=int(e[0]), name=e[1], code=e[2])
-                for e in set(
-                    zip(
-                        dimension_values.pop("entity_id"),
-                        dimension_values.pop("entity_name"),
-                        dimension_values.pop("entity_code"),
-                    )
+                for e in zip(
+                    dimension_values.pop("entity_id"),
+                    dimension_values.pop("entity_name"),
+                    dimension_values.pop("entity_code"),
                 )
-            ],
-        )
-
-    # NOTE: we have inconsistency with plurals - even though the dimension name is
-    # singular, we use plural in the API (but not for custom dimensions)
-    if "year" in dimension_values:
-        dimensions["years"] = Dimension(
-            type="int",
-            values=[
-                DimensionProperties(id=y) for y in set(dimension_values.pop("year"))
             ],
         )
 
     # process remaining dimensions
     for dim in dimension_values.keys():
         raise NotImplementedError()
-        dimensions[dim] = Dimension(
-            type=variable_type,
-            values=[DimensionProperties(id=y) for y in set(dimension_values.pop(dim))],
-        )
+        # dimensions[dim] = Dimension(
+        #     type=variable_type,
+        #     values=[DimensionProperties(id=y) for y in set(dimension_values.pop(dim))],
+        # )
 
     return dimensions
 
 
-@v1.get(
-    "/dataset/metadata/{channel}/{namespace}/{version}/{dataset}/{table}",
-    # response_model=VariableMetadataResponse,
-    # response_model_exclude_unset=True,
-)
-def metadata_for_etl_variable(
-    channel: str,
-    namespace: str,
-    version: str,
-    dataset: str,
-    table: str,
-):
-    table_path = f"{channel}/{namespace}/{version}/{dataset}/{table}"
-
-    con = get_readonly_connection(threading.get_ident())
-
-    q = f"""
+def _metadata_etl_variables(con, table_path):
+    q = """
     SELECT
         -- variables (commented columns are not relevant for ETL tables)
         v.title,
@@ -207,12 +188,14 @@ def metadata_for_etl_variable(
     # TODO: this is a hacky and slow way to do it, use ORM or proper dataclass instead
     vf = cast(pd.DataFrame, con.execute(q, parameters=[table_path]).fetch_df())
 
-    # convert JSON to dict
-    # TODO: can we handle JSONs through sqlalchemy?
+    # convert JSON to dict (should be done automatically once we switch to ORM)
     for col in ("licenses", "sources"):
         vf[col] = vf[col].apply(json.loads)
+    return vf
 
-    q = f"""
+
+def _metadata_etl_table(con, table_path):
+    q = """
     SELECT
         table_name,
         dataset_name,
@@ -234,7 +217,10 @@ def metadata_for_etl_variable(
 
     for col in ("dimensions",):
         tf[col] = tf[col].apply(json.loads)
+    return tf
 
+
+def _metadata_etl_dataset(con, namespace, version, dataset):
     q = """
     SELECT
         namespace,
@@ -268,6 +254,29 @@ def metadata_for_etl_variable(
 
     for col in ("sources", "licenses"):
         df[col] = df[col].apply(json.loads)
+
+    return df
+
+
+@v1.get(
+    "/dataset/metadata/{channel}/{namespace}/{version}/{dataset}/{table}",
+    # response_model=VariableMetadataResponse,
+    # response_model_exclude_unset=True,
+)
+def metadata_for_etl_variable(
+    channel: str,
+    namespace: str,
+    version: str,
+    dataset: str,
+    table: str,
+):
+    table_path = f"{channel}/{namespace}/{version}/{dataset}/{table}"
+
+    con = get_readonly_connection(threading.get_ident())
+
+    vf = _metadata_etl_variables(con, table_path)
+    tf = _metadata_etl_table(con, table_path)
+    df = _metadata_etl_dataset(con, namespace, version, dataset)
 
     return {
         "variables": vf.to_dict(orient="records"),

@@ -3,7 +3,7 @@ from pathlib import Path
 import structlog
 from owid.catalog import DatasetMeta
 from owid.catalog.catalogs import CatalogSeries
-from sqlalchemy import JSON, Boolean, Column, Integer, Sequence, String, create_engine
+from sqlalchemy import JSON, Boolean, Column, Integer, String, create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -43,8 +43,8 @@ class MetaDatasetModel(Base):  # type: ignore
             namespace=ds.namespace,
             title=ds.title,
             description=ds.description,
-            sources=[s.to_dict() for s in ds.sources],
-            licenses=[l.to_dict() for l in ds.licenses],
+            sources=[source.to_dict() for source in ds.sources],
+            licenses=[license.to_dict() for license in ds.licenses],
             is_public=ds.is_public,
             source_checksum=ds.source_checksum,
             grapher_meta=ds.additional_info["grapher_meta"]
@@ -115,9 +115,8 @@ class MetaVariableModel(Base):  # type: ignore
     # this is an attribute of additional_info['grapher_meta']
     grapher_meta = Column(JSON)
 
-    # NOTE: Sequence is needed for duckdb integer primary keys
-    # TODO: this cannot be primary key as not all have
-    variable_id = Column(Integer, Sequence("fakemodel_id_sequence"), primary_key=True)
+    variable_path = Column(String, primary_key=True)
+    variable_id = Column(Integer)
 
     # inferred columns by crawler
     short_name = Column(String)
@@ -128,6 +127,10 @@ class MetaVariableModel(Base):  # type: ignore
 
     # distinct values of years and entities encoded as JSON
     dimension_values = Column(JSON)
+
+    def __init__(self, *args, **kwargs):
+        kwargs["variable_path"] = f"{kwargs['table_path']}/{kwargs['short_name']}"
+        super().__init__(*args, **kwargs)
 
 
 def db_init(path: Path) -> Engine:

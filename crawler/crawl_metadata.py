@@ -3,7 +3,7 @@ import urllib.error
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, cast
+from typing import Optional, Set, Tuple, cast
 
 import pandas as pd
 import structlog
@@ -118,8 +118,8 @@ def _parse_meta_variable(
     v = MetaVariableModel(
         title=var_meta.title,
         description=var_meta.description,
-        licenses=[l.to_dict() for l in var_meta.licenses],
-        sources=[s.to_dict() for s in var_meta.sources],
+        licenses=[license.to_dict() for license in var_meta.licenses],
+        sources=[source.to_dict() for source in var_meta.sources],
         unit=var_meta.unit,
         short_unit=var_meta.short_unit,
         display=var_meta.display,
