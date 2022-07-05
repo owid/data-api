@@ -56,14 +56,6 @@ class Dimension(BaseModel):
         extra = Extra.forbid
 
 
-class Dimensions(BaseModel):
-    years: Dimension
-    entities: Dimension
-
-    class Config:
-        extra = Extra.forbid
-
-
 class VariableMetadataResponse(BaseModel):
     name: str
     unit: str
@@ -84,7 +76,7 @@ class VariableMetadataResponse(BaseModel):
     # MAYBE CHANGE - this should be turned into an array
     source: VariableSource
     type: str
-    dimensions: Dimensions
+    dimensions: Dict[str, Dimension]
 
     class Config:
         extra = Extra.forbid

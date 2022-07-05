@@ -8,12 +8,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, cast
 import pandas as pd
 import structlog
 import typer
-from duckdb_models import (
-    MetaDatasetModel,
-    MetaTableModel,
-    MetaVariableModel,
-    db_init,
-)
+from duckdb_models import MetaDatasetModel, MetaTableModel, MetaVariableModel, db_init
 from owid.catalog import DatasetMeta, RemoteCatalog, Table, VariableMeta
 from owid.catalog.catalogs import CatalogFrame, CatalogSeries
 from sqlalchemy.engine import Engine
@@ -123,12 +118,12 @@ def _parse_meta_variable(
     v = MetaVariableModel(
         title=var_meta.title,
         description=var_meta.description,
-        licenses=json.dumps([l.to_dict() for l in var_meta.licenses]),
-        sources=json.dumps([s.to_dict() for s in var_meta.sources]),
+        licenses=[l.to_dict() for l in var_meta.licenses],
+        sources=[s.to_dict() for s in var_meta.sources],
         unit=var_meta.unit,
         short_unit=var_meta.short_unit,
-        display=json.dumps(var_meta.display),
-        grapher_meta=json.dumps(var_meta.additional_info["grapher_meta"])
+        display=var_meta.display,
+        grapher_meta=var_meta.additional_info["grapher_meta"]
         if var_meta.additional_info
         else None,
         variable_id=var_meta.additional_info["grapher_meta"]["id"]
@@ -141,27 +136,22 @@ def _parse_meta_variable(
         dataset_short_name=dataset_short_name,
     )
 
+    # NOTE: `read_sql` does not support categorical type, so we have to convert to varchar
+    cols = [f"{dim}::VARCHAR as {dim}" for dim in m.dimensions]
+
     # TODO: we end up with lot of duplicates across variables (especially for the huge backported datasets)
     #   how about we only do it for every dataset? (we'd be returning even years for which the given variable
     #   doesn't have any data)
-    # get used years from a dataframe
-    q = f"""
-    select distinct year from {m.table_db_name} where {short_name} is not null
-    """
-    mf = pd.read_sql(q, engine)
-    v.years_values = json.dumps(mf.year.tolist())
-
-    # entities_values
-    # NOTE: `read_sql` does not support categorical type, so we have to convert to varchar
     q = f"""
     select distinct
-        entity_id,
-        entity_code::VARCHAR as entity_code,
-        entity_name::VARCHAR as entity_name
+        {','.join(cols)}
     from {m.table_db_name} where {short_name} is not null
     """
+
     mf = pd.read_sql(q, engine)
-    v.entities_values = json.dumps(mf.to_dict(orient="list"))
+    v.dimension_values = {
+        k: sorted(set(v)) for k, v in mf.to_dict(orient="list").items()
+    }
 
     return v
 
@@ -175,7 +165,6 @@ def _upsert_dataset(ds: DatasetMeta, session: Session) -> None:
     """Update dataset in DB."""
     session.query(MetaDatasetModel).filter_by(short_name=ds.short_name).delete()
     session.commit()
-    # TODO: this could be method `MetaDatasetModel.from_DatasetMeta`
     d = MetaDatasetModel.from_DatasetMeta(ds)
     session.add(d)
     session.commit()

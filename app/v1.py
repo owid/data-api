@@ -1,7 +1,7 @@
 import functools
 import json
 import threading
-from typing import cast
+from typing import Any, Dict, cast
 
 import duckdb
 import numpy as np
@@ -9,15 +9,16 @@ import pandas as pd
 import structlog
 from fastapi import FastAPI, HTTPException
 
+from app import utils
 from app.core.config import settings
 from app.schemas.v1 import (
     Dimension,
     DimensionProperties,
-    Dimensions,
     VariableDataResponse,
     VariableMetadataResponse,
     VariableSource,
 )
+from crawler.utils import sanitize_table_path
 
 log = structlog.get_logger()
 
@@ -26,7 +27,7 @@ log = structlog.get_logger()
 # https://github.com/duckdb/duckdb/blob/master/examples/python/duckdb-python.py
 
 
-v1 = FastAPI()
+v1 = FastAPI(default_response_class=utils.ORJSONResponse)
 
 
 @functools.cache
@@ -54,7 +55,7 @@ def _assert_single_variable(n, variable_id):
     response_model=VariableDataResponse,
     response_model_exclude_unset=True,
 )
-def data_for_variable(variable_id: int, limit: int = 1000000000):
+def data_for_backported_variable(variable_id: int, limit: int = 1000000000):
     """Fetch data for a single variable."""
 
     con = get_readonly_connection(threading.get_ident())
@@ -89,45 +90,190 @@ def data_for_variable(variable_id: int, limit: int = 1000000000):
     return df.to_dict(orient="list")
 
 
+@v1.get(
+    "/dataset/data/{channel}/{namespace}/{version}/{dataset}/{table}",
+)
+def data_for_etl_variable(
+    channel: str,
+    namespace: str,
+    version: str,
+    dataset: str,
+    table: str,
+    limit: int = 1000000000,
+):
+    """Fetch data for a single variable."""
+
+    con = get_readonly_connection(threading.get_ident())
+
+    table_db_name = sanitize_table_path(
+        f"{channel}/{namespace}/{version}/{dataset}/{table}"
+    )
+
+    q = f"""
+    select
+        *
+    from {table_db_name}
+    limit (?)
+    """
+    df = cast(pd.DataFrame, con.execute(q, parameters=[limit]).fetch_df())
+    # TODO: converting to lists and then ormjson is slow, we could instead
+    # convert to numpy arrays on which ormjson is super fast
+    return df.to_dict(orient="list")
+
+
 def omit_nullable_values(d: dict) -> dict:
     return {k: v for k, v in d.items() if v is not None and not pd.isna(v)}
 
 
-def _get_dimensions():
-    # get variable types from duckdb (all metadata would be eventually retrieved in duckdb)
-    con = get_readonly_connection(threading.get_ident())
-    q = """
-    select
-        variable_type,
-        entities_values,
-        years_values
-    from meta_variables where variable_id
-    """
-    variable_type, entities_values, years_values = con.execute(q).fetchone()  # type: ignore
+def _parse_dimension_values(dimension_values: Any) -> Dict[str, Dimension]:
+    dimensions = {}
 
-    years_values = json.loads(years_values)
-    entities_values = json.loads(entities_values)
-
-    entities_values = zip(
-        entities_values["entity_id"],
-        entities_values["entity_name"],
-        entities_values["entity_code"],
-    )
-
-    dimensions = Dimensions(
-        years=Dimension(
-            type="int", values=[DimensionProperties(id=y) for y in years_values]
-        ),
-        entities=Dimension(
+    # special case of entities backported variables with entities and their codes
+    if {"entity_id", "entity_name", "entity_code"} <= set(dimension_values.keys()):
+        dimensions["entities"] = Dimension(
             type="int",
             values=[
-                DimensionProperties(id=e[0], name=e[1], code=e[2])
-                for e in entities_values
+                DimensionProperties(id=int(e[0]), name=e[1], code=e[2])
+                for e in set(
+                    zip(
+                        dimension_values.pop("entity_id"),
+                        dimension_values.pop("entity_name"),
+                        dimension_values.pop("entity_code"),
+                    )
+                )
             ],
-        ),
+        )
+
+    # NOTE: we have inconsistency with plurals - even though the dimension name is
+    # singular, we use plural in the API (but not for custom dimensions)
+    if "year" in dimension_values:
+        dimensions["years"] = Dimension(
+            type="int",
+            values=[
+                DimensionProperties(id=y) for y in set(dimension_values.pop("year"))
+            ],
+        )
+
+    # process remaining dimensions
+    for dim in dimension_values.keys():
+        raise NotImplementedError()
+        dimensions[dim] = Dimension(
+            type=variable_type,
+            values=[DimensionProperties(id=y) for y in set(dimension_values.pop(dim))],
+        )
+
+    return dimensions
+
+
+@v1.get(
+    "/dataset/metadata/{channel}/{namespace}/{version}/{dataset}/{table}",
+    # response_model=VariableMetadataResponse,
+    # response_model_exclude_unset=True,
+)
+def metadata_for_etl_variable(
+    channel: str,
+    namespace: str,
+    version: str,
+    dataset: str,
+    table: str,
+):
+    table_path = f"{channel}/{namespace}/{version}/{dataset}/{table}"
+
+    con = get_readonly_connection(threading.get_ident())
+
+    q = f"""
+    SELECT
+        -- variables (commented columns are not relevant for ETL tables)
+        v.title,
+        v.description,
+        v.licenses,
+        v.sources,
+        v.unit,
+        v.short_unit,
+        -- v.display,
+        -- v.grapher_meta,
+        -- v.variable_id,
+        v.short_name,
+        v.table_path,
+        v.table_db_name,
+        v.dataset_short_name,
+        v.variable_type,
+        -- TODO: should we include `dimension_values` in response or do we only need it for backported variables?
+        -- v.dimension_values,
+    FROM meta_variables as v
+    WHERE v.table_path = (?)
+    """
+
+    # TODO: this is a hacky and slow way to do it, use ORM or proper dataclass instead
+    vf = cast(pd.DataFrame, con.execute(q, parameters=[table_path]).fetch_df())
+
+    # convert JSON to dict
+    # TODO: can we handle JSONs through sqlalchemy?
+    for col in ("licenses", "sources"):
+        vf[col] = vf[col].apply(json.loads)
+
+    q = f"""
+    SELECT
+        table_name,
+        dataset_name,
+        table_db_name,
+        version,
+        namespace,
+        channel,
+        checksum,
+        dimensions,
+        path,
+        format,
+        is_public,
+    FROM meta_tables as t
+    WHERE path = (?)
+    """
+
+    # TODO: this is a hacky and slow way to do it, use ORM or proper dataclass instead
+    tf = cast(pd.DataFrame, con.execute(q, parameters=[table_path]).fetch_df())
+
+    for col in ("dimensions",):
+        tf[col] = tf[col].apply(json.loads)
+
+    q = """
+    SELECT
+        namespace,
+        short_name,
+        title,
+        description,
+        sources,
+        licenses,
+        is_public,
+        source_checksum,
+        version,
+        -- grapher_meta
+    FROM meta_datasets as d
+    -- TODO: we might want to use path instead of separate columns
+    WHERE namespace = (?) and version = (?) and short_name = (?)
+    """
+
+    df = cast(
+        pd.DataFrame,
+        con.execute(
+            q,
+            parameters=[
+                # TODO: how come we don't have `channel` in DatasetMeta?? we should have it there
+                # channel,
+                namespace,
+                version,
+                dataset,
+            ],
+        ).fetch_df(),
     )
 
-    return dimensions, variable_type
+    for col in ("sources", "licenses"):
+        df[col] = df[col].apply(json.loads)
+
+    return {
+        "variables": vf.to_dict(orient="records"),
+        "table": tf.iloc[0].to_dict(),
+        "dataset": df.iloc[0].to_dict(),
+    }
 
 
 # QUESTION: how about `/variable/{variable_id}/metadata` naming?
@@ -136,7 +282,7 @@ def _get_dimensions():
     response_model=VariableMetadataResponse,
     response_model_exclude_unset=True,
 )
-def metadata_for_variable(variable_id: int):
+def metadata_for_backported_variable(variable_id: int):
     """Fetch metadata for a single variable from database.
     This function is identical to Variables.getVariableData in owid-grapher repository
     """
@@ -196,9 +342,18 @@ def metadata_for_variable(variable_id: int):
     displayJson = row.pop("display")
     variable = omit_nullable_values(row)
 
+    # get variable types from duckdb (all metadata would be eventually retrieved in duckdb)
     # NOTE: getting these is a bit of a pain, we have a lot of duplicate information
     # in our DB
-    dimensions, variable_type = _get_dimensions()
+    q = """
+    select
+        variable_type,
+        dimension_values
+    from meta_variables where variable_id = (?)
+    """
+    variable_type, dimension_values = con.execute(q, parameters=[variable_id]).fetchone()  # type: ignore
+
+    dimensions = _parse_dimension_values(json.loads(dimension_values))
 
     return VariableMetadataResponse(
         nonRedistributable=bool(nonRedistributable),

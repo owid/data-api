@@ -28,7 +28,7 @@ def test_data_for_variable():
     }
 
 
-def test_metadata_for_variable():
+def test_metadata_for_backported_variable():
     # this test requires connection to the database, this is only temporary and will change once we start getting
     # metadata from the catalog instead of the database
     response = client.get("/v1/variableById/metadata/42539")
@@ -82,5 +82,119 @@ def test_metadata_for_variable():
                 "type": "int",
                 "values": [{"id": 13, "name": "United States", "code": "USA"}],
             },
+        },
+    }
+
+
+def test_data_for_etl_table():
+    # this test requires connection to the database, this is only temporary and will change once we start getting
+    # metadata from the catalog instead of the database
+    response = client.get(
+        "/v1/dataset/data/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+        params={"limit": 2},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "country": ["Afghanistan", "Afghanistan"],
+        "gdp": [None, None],
+        "gdp_per_capita": [None, None],
+        "population": [3280000.0, 4207000.0],
+        "year": [1820, 1870],
+    }
+
+
+def test_metadata_for_etl_table():
+    response = client.get(
+        "/v1/dataset/metadata/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+        params={"limit": 2},
+    )
+    assert response.status_code == 200
+    js = response.json()
+
+    # trim long fields
+    js["dataset"]["description"] = js["dataset"]["description"][:20]
+
+    assert js == {
+        "variables": [
+            {
+                "title": "GDP per capita",
+                "description": None,
+                "licenses": [],
+                "sources": [],
+                "unit": "2011 int-$",
+                "short_unit": "$",
+                "short_name": "gdp_per_capita",
+                "table_path": "garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+                "table_db_name": "garden__ggdc__2020_10_01__ggdc_maddison__maddison_gdp",
+                "dataset_short_name": "ggdc_maddison",
+                "variable_type": "FLOAT",
+            },
+            {
+                "title": "Population",
+                "description": None,
+                "licenses": [],
+                "sources": [],
+                "unit": "people",
+                "short_unit": None,
+                "short_name": "population",
+                "table_path": "garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+                "table_db_name": "garden__ggdc__2020_10_01__ggdc_maddison__maddison_gdp",
+                "dataset_short_name": "ggdc_maddison",
+                "variable_type": "FLOAT",
+            },
+            {
+                "title": "GDP",
+                "description": "Gross domestic product measured in international-$ using 2011 prices to adjust for price changes over time (inflation) and price differences between countries. Calculated by multiplying GDP per capita with population.",
+                "licenses": [],
+                "sources": [],
+                "unit": "2011 int-$",
+                "short_unit": "$",
+                "short_name": "gdp",
+                "table_path": "garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+                "table_db_name": "garden__ggdc__2020_10_01__ggdc_maddison__maddison_gdp",
+                "dataset_short_name": "ggdc_maddison",
+                "variable_type": "FLOAT",
+            },
+        ],
+        "table": {
+            "table_name": "maddison_gdp",
+            "dataset_name": "ggdc_maddison",
+            "table_db_name": "garden__ggdc__2020_10_01__ggdc_maddison__maddison_gdp",
+            "version": "2020-10-01",
+            "namespace": "ggdc",
+            "channel": "garden",
+            "checksum": "7236fb37ff655adc0d9924a9e79937ed",
+            "dimensions": ["country", "year"],
+            "path": "garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+            "format": "feather",
+            "is_public": True,
+        },
+        "dataset": {
+            "namespace": "ggdc",
+            "short_name": "ggdc_maddison",
+            "title": "Maddison Project Database (GGDC, 2020)",
+            "description": "Notes:\n- Tanzania re",
+            "sources": [
+                {
+                    "name": "Maddison Project Database 2020 (Bolt and van Zanden, 2020)",
+                    "url": "https://www.rug.nl/ggdc/historicaldevelopment/maddison/releases/maddison-project-database-2020",
+                    "source_data_url": "https://www.rug.nl/ggdc/historicaldevelopment/maddison/data/mpd2020.xlsx",
+                    "owid_data_url": "https://walden.nyc3.digitaloceanspaces.com/ggdc/2020-10-01/ggdc_maddison.xlsx",
+                    "date_accessed": "2022-04-12",
+                    "publication_date": "2020-10-01",
+                    "publication_year": 2020,
+                    "published_by": "Bolt, Jutta and Jan Luiten van Zanden (2020), “Maddison style estimates of the evolution of the world economy. A new 2020 update“.",
+                    "publisher_source": "The Maddison Project Database is based on the work of many researchers that have produced estimates of\neconomic growth for individual countries. The full list of sources for this historical data is given for each country below.\n",
+                }
+            ],
+            "licenses": [
+                {
+                    "name": "Creative Commons BY 4.0",
+                    "url": "https://www.rug.nl/ggdc/historicaldevelopment/maddison/releases/maddison-project-database-2020",
+                }
+            ],
+            "is_public": True,
+            "source_checksum": "a63167b871d470beb15546b565ed2185",
+            "version": "2020-10-01",
         },
     }

@@ -36,6 +36,9 @@ watch: .venv
 .venv: pyproject.toml poetry.toml poetry.lock .submodule-init
 	@echo '==> Installing packages'
 	poetry install
+	# poetry freezes when downloading orjson for some reason, so we need to install it manually
+	# try to fix this in the future
+	poetry run pip install orjson
 	touch $@
 
 check-typing: .venv
@@ -53,7 +56,7 @@ api: .venv
 testdb: .venv
 	@echo '==> Rebuild test DB'
 	rm tests/sample_duck.db
-	python crawler/crawl_metadata.py --include dataset_941 --duckdb-path tests/sample_duck.db
+	python crawler/crawl_metadata.py --include 'dataset_941|ggdc_maddison' --duckdb-path tests/sample_duck.db
 
 clobber: clean
 	find . -name .venv | xargs rm -rf

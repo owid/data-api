@@ -1,12 +1,13 @@
 from pathlib import Path
 
-from sqlalchemy import Boolean, Column, Integer, Sequence, String, create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.ext.declarative import declarative_base
-import json
-from owid.catalog.catalogs import CatalogSeries
 import structlog
 from owid.catalog import DatasetMeta
+from owid.catalog.catalogs import CatalogSeries
+from sqlalchemy import JSON, Boolean, Column, Integer, Sequence, String, create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.ext.declarative import declarative_base
+
+from utils import sanitize_table_path
 
 Base = declarative_base()
 
@@ -26,14 +27,14 @@ class MetaDatasetModel(Base):  # type: ignore
     short_name = Column(String, primary_key=True)
     title = Column(String)
     description = Column(String)
-    sources = Column(String)
-    licenses = Column(String)
+    sources = Column(JSON)
+    licenses = Column(JSON)
     is_public = Column(Boolean)
     source_checksum = Column(String)
     version = Column(String)
 
     # this is an attribute of additional_info['grapher_meta']
-    grapher_meta = Column(String)
+    grapher_meta = Column(JSON)
 
     @classmethod
     def from_DatasetMeta(cls, ds: DatasetMeta) -> "MetaDatasetModel":
@@ -42,11 +43,11 @@ class MetaDatasetModel(Base):  # type: ignore
             namespace=ds.namespace,
             title=ds.title,
             description=ds.description,
-            sources=json.dumps([s.to_dict() for s in ds.sources]),
-            licenses=json.dumps([l.to_dict() for l in ds.licenses]),
+            sources=[s.to_dict() for s in ds.sources],
+            licenses=[l.to_dict() for l in ds.licenses],
             is_public=ds.is_public,
             source_checksum=ds.source_checksum,
-            grapher_meta=json.dumps(ds.additional_info["grapher_meta"])
+            grapher_meta=ds.additional_info["grapher_meta"]
             if ds.additional_info
             else None,
             version=ds.version,
@@ -66,7 +67,7 @@ class MetaTableModel(Base):  # type: ignore
     namespace = Column(String)
     channel = Column(String)
     checksum = Column(String)
-    dimensions = Column(String)
+    dimensions = Column(JSON)
     path = Column(String)
     format = Column(String)
     is_public = Column(Boolean)
@@ -75,8 +76,7 @@ class MetaTableModel(Base):  # type: ignore
         # TODO: path could be very long, but how do we guarantee uniqueness of table name
         #   across datasets? or should we just go with table name and use full path only
         #   for non-unique table names?
-        # NOTE: version can contain - in dates (e.g. 2020-10-01)
-        kwargs["table_db_name"] = kwargs["path"].replace("/", "__").replace("-", "_")
+        kwargs["table_db_name"] = sanitize_table_path(kwargs["path"])
         super().__init__(*args, **kwargs)
 
     @classmethod
@@ -106,16 +106,17 @@ class MetaVariableModel(Base):  # type: ignore
     # columns from VariableMeta
     title = Column(String)
     description = Column(String)
-    licenses = Column(String)
-    sources = Column(String)
+    licenses = Column(JSON)
+    sources = Column(JSON)
     unit = Column(String)
     short_unit = Column(String)
-    display = Column(String)
+    display = Column(JSON)
 
     # this is an attribute of additional_info['grapher_meta']
-    grapher_meta = Column(String)
+    grapher_meta = Column(JSON)
 
     # NOTE: Sequence is needed for duckdb integer primary keys
+    # TODO: this cannot be primary key as not all have
     variable_id = Column(Integer, Sequence("fakemodel_id_sequence"), primary_key=True)
 
     # inferred columns by crawler
@@ -126,8 +127,7 @@ class MetaVariableModel(Base):  # type: ignore
     variable_type = Column(String)
 
     # distinct values of years and entities encoded as JSON
-    years_values = Column(String)
-    entities_values = Column(String)
+    dimension_values = Column(JSON)
 
 
 def db_init(path: Path) -> Engine:
