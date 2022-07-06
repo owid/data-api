@@ -161,11 +161,11 @@ def _delete_tables(table_path: str, session: Session) -> None:
     session.query(MetaVariableModel).filter_by(table_path=table_path).delete()
 
 
-def _upsert_dataset(ds: DatasetMeta, session: Session) -> None:
+def _upsert_dataset(ds: DatasetMeta, channel: str, session: Session) -> None:
     """Update dataset in DB."""
     session.query(MetaDatasetModel).filter_by(short_name=ds.short_name).delete()
     session.commit()
-    d = MetaDatasetModel.from_DatasetMeta(ds)
+    d = MetaDatasetModel.from_DatasetMeta(ds, channel)
     session.add(d)
     session.commit()
 
@@ -263,7 +263,8 @@ def main(
             assert ds.short_name
 
             # update dataset by deleting and recreating new one
-            _upsert_dataset(ds, session)
+            # TODO: channel should be ideally property of DatasetMeta
+            _upsert_dataset(ds, str(t.channel), session)
 
             # load data into DuckDB
             _load_table_data_into_db(t, data_table, engine)

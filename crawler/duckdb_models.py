@@ -23,6 +23,11 @@ class MetaDatasetModel(Base):  # type: ignore
 
     __tablename__ = "meta_datasets"
 
+    # TODO: what should we use as the primary key? either we use autoincremented ids or we
+    # use paths (e.g. `garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp` is an address to table)
+    # what are the pros and cons of each?
+
+    channel = Column(String)
     namespace = Column(String)
     short_name = Column(String, primary_key=True)
     title = Column(String)
@@ -37,8 +42,9 @@ class MetaDatasetModel(Base):  # type: ignore
     grapher_meta = Column(JSON)
 
     @classmethod
-    def from_DatasetMeta(cls, ds: DatasetMeta) -> "MetaDatasetModel":
+    def from_DatasetMeta(cls, ds: DatasetMeta, channel: str) -> "MetaDatasetModel":
         return MetaDatasetModel(
+            channel=channel,
             short_name=ds.short_name,
             namespace=ds.namespace,
             title=ds.title,

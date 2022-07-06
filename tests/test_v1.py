@@ -170,6 +170,7 @@ def test_metadata_for_etl_table():
             "is_public": True,
         },
         "dataset": {
+            "channel": "garden",
             "namespace": "ggdc",
             "short_name": "ggdc_maddison",
             "title": "Maddison Project Database (GGDC, 2020)",

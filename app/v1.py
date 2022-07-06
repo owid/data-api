@@ -220,9 +220,10 @@ def _metadata_etl_table(con, table_path):
     return tf
 
 
-def _metadata_etl_dataset(con, namespace, version, dataset):
+def _metadata_etl_dataset(con, channel, namespace, version, dataset):
     q = """
     SELECT
+        channel,
         namespace,
         short_name,
         title,
@@ -235,7 +236,7 @@ def _metadata_etl_dataset(con, namespace, version, dataset):
         -- grapher_meta
     FROM meta_datasets as d
     -- TODO: we might want to use path instead of separate columns
-    WHERE namespace = (?) and version = (?) and short_name = (?)
+    WHERE channel = (?) and namespace = (?) and version = (?) and short_name = (?)
     """
 
     df = cast(
@@ -243,8 +244,7 @@ def _metadata_etl_dataset(con, namespace, version, dataset):
         con.execute(
             q,
             parameters=[
-                # TODO: how come we don't have `channel` in DatasetMeta?? we should have it there
-                # channel,
+                channel,
                 namespace,
                 version,
                 dataset,
@@ -276,7 +276,7 @@ def metadata_for_etl_variable(
 
     vf = _metadata_etl_variables(con, table_path)
     tf = _metadata_etl_table(con, table_path)
-    df = _metadata_etl_dataset(con, namespace, version, dataset)
+    df = _metadata_etl_dataset(con, channel, namespace, version, dataset)
 
     return {
         "variables": vf.to_dict(orient="records"),
