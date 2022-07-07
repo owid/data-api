@@ -35,6 +35,8 @@ watch: .venv
 	touch $@
 
 .venv: pyproject.toml poetry.toml poetry.lock .submodule-init
+	@echo '==> Copy .env.example to .env if missing'
+	cp -n .env.example .env || true
 	@echo '==> Installing packages'
 	poetry install
 	# poetry freezes when downloading orjson for some reason, so we need to install it manually

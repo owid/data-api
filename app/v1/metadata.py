@@ -166,13 +166,10 @@ def _parse_dimension_values(dimension_values: Any) -> Dict[str, Dimension]:
             ],
         )
 
-    # process remaining dimensions
-    for dim in dimension_values.keys():
-        raise NotImplementedError()
-        # dimensions[dim] = Dimension(
-        #     type=variable_type,
-        #     values=[DimensionProperties(id=y) for y in set(dimension_values.pop(dim))],
-        # )
+    assert not dimension_values, (
+        "This currently works only for backported datasets with dimensions "
+        '{"year", "entity_id", "entity_name", "entity_code"}'
+    )
 
     return dimensions
 

@@ -1,5 +1,5 @@
 import threading
-from typing import cast
+from typing import cast, Optional
 
 import pandas as pd
 import structlog
@@ -22,7 +22,7 @@ router = APIRouter()
     response_model=VariableDataResponse,
     response_model_exclude_unset=True,
 )
-def data_for_backported_variable(variable_id: int, limit: int = 1000000000):
+def data_for_backported_variable(variable_id: int, limit: Optional[int] = None):
     """Fetch data for a single variable."""
 
     con = utils.get_readonly_connection(threading.get_ident())
@@ -51,9 +51,12 @@ def data_for_backported_variable(variable_id: int, limit: int = 1000000000):
         {r["short_name"]} as value
     from {r["table_db_name"]}
     where {r["short_name"]} is not null
-    limit (?)
     """
-    df = cast(pd.DataFrame, con.execute(q, parameters=[limit]).fetch_df())
+    parameters = []
+    if limit:
+        q += "limit (?)"
+        parameters.append(limit)
+    df = cast(pd.DataFrame, con.execute(q, parameters=parameters).fetch_df())
     return df.to_dict(orient="list")
 
 
