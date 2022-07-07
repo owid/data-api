@@ -50,6 +50,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+cover/
 
 # Translations
 *.mo
@@ -72,6 +73,7 @@ instance/
 docs/_build/
 
 # PyBuilder
+.pybuilder/
 target/
 
 # Jupyter Notebook
@@ -127,3 +129,33 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# Text Editor
+.vscode
+
+
+# Custom
+.coverage
+**/__pycache__
+.virtual_documents
+**/.ipynb_checkpoints
+.submodule-init
+.mypy-cache
+.pytest-cache
+.python-version
+.venv
+__pycache__
+.ipynb_checkpoints
+.env
+*.dot
+*.pdf
+pyrightconfig.json
+.DS_Store
+ign.*
+.idea
