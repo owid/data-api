@@ -1,12 +1,14 @@
 import threading
 from typing import cast, Optional
 
+import io
 import pandas as pd
+import pyarrow as pa
 import structlog
 import tempfile
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from pyarrow.feather import write_feather
 
 from app import utils
@@ -86,7 +88,6 @@ def data_for_etl_variable(
 
 @router.get(
     "/dataset/feather/{channel}/{namespace}/{version}/{dataset}/{table}",
-    response_class=FileResponse,
 )
 def feather_for_etl_variable(
     channel: str,
@@ -98,9 +99,14 @@ def feather_for_etl_variable(
 ):
     """Fetch data for a single variable in feather format."""
     query = _query_for_etl_variable(channel, namespace, version, dataset, table, limit)
-    filename = 'asdf.feather'  #TODO
-    write_feather(query.fetch_arrow_table(), filename, compression='zstd')
-    return filename
+    df = cast(pd.DataFrame, query.fetch_df())
+
+    stream = io.BytesIO()
+    write_feather(df, stream)
+
+    response = StreamingResponse(iter([stream.getvalue()]), media_type="application/octet-stream")
+    response.headers["Content-Disposition"] = "attachment; filename=test.feather"
+    return response
 
 
 def _query_for_etl_variable(
