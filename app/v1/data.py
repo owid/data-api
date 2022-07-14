@@ -79,8 +79,7 @@ def data_for_etl_variable(
 ):
     """Fetch data for a single variable."""
 
-    query = _query_for_etl_variable(channel, namespace, version, dataset, table, limit)
-    df = cast(pd.DataFrame, query.fetch_df())
+    df = _fetch_df_for_etl_variable(channel, namespace, version, dataset, table, limit)
     # TODO: converting to lists and then ormjson is slow, we could instead
     # convert to numpy arrays on which ormjson is super fast
     return df.to_dict(orient="list")
@@ -98,10 +97,8 @@ def feather_for_etl_variable(
     limit: int = 1000000000,
 ):
     """Fetch data for a single variable in feather format."""
-    query = _query_for_etl_variable(channel, namespace, version, dataset, table, limit)
-    df = cast(pd.DataFrame, query.fetch_df())
-
     stream = io.BytesIO()
+    df = _fetch_df_for_etl_variable(channel, namespace, version, dataset, table, limit)
     write_feather(df, stream)
 
     response = StreamingResponse(iter([stream.getvalue()]), media_type="application/octet-stream")
@@ -109,7 +106,7 @@ def feather_for_etl_variable(
     return response
 
 
-def _query_for_etl_variable(
+def _fetch_df_for_etl_variable(
         channel: str,
         namespace: str,
         version: str,
@@ -127,7 +124,7 @@ def _query_for_etl_variable(
     limit (?)
     """
     query_result = con.execute(q, parameters=[limit])
-    return query_result
+    return cast(pd.DataFrame, query_result.fetch_df())
 
 
 def _assert_single_variable(n, variable_id):
