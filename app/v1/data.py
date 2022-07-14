@@ -3,9 +3,7 @@ from typing import cast, Optional
 
 import io
 import pandas as pd
-import pyarrow as pa
 import structlog
-import tempfile
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
