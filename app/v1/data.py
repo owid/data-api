@@ -1,9 +1,13 @@
 import threading
 from typing import cast, Optional
 
+import io
 import pandas as pd
 import structlog
+
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
+from pyarrow.feather import write_feather
 
 from app import utils
 from crawler.utils import sanitize_table_path
@@ -73,22 +77,52 @@ def data_for_etl_variable(
 ):
     """Fetch data for a single variable."""
 
-    con = utils.get_readonly_connection(threading.get_ident())
+    df = _fetch_df_for_etl_variable(channel, namespace, version, dataset, table, limit)
+    # TODO: converting to lists and then ormjson is slow, we could instead
+    # convert to numpy arrays on which ormjson is super fast
+    return df.to_dict(orient="list")
 
+
+@router.get(
+    "/dataset/feather/{channel}/{namespace}/{version}/{dataset}/{table}",
+)
+def feather_for_etl_variable(
+    channel: str,
+    namespace: str,
+    version: str,
+    dataset: str,
+    table: str,
+    limit: int = 1000000000,
+):
+    """Fetch data for a single variable in feather format."""
+    stream = io.BytesIO()
+    df = _fetch_df_for_etl_variable(channel, namespace, version, dataset, table, limit)
+    write_feather(df, stream)
+
+    response = StreamingResponse(iter([stream.getvalue()]), media_type="application/octet-stream")
+    response.headers["Content-Disposition"] = "attachment; filename=test.feather"
+    return response
+
+
+def _fetch_df_for_etl_variable(
+        channel: str,
+        namespace: str,
+        version: str,
+        dataset: str,
+        table: str,
+        limit: int):
+    con = utils.get_readonly_connection(threading.get_ident())
     table_db_name = sanitize_table_path(
         f"{channel}/{namespace}/{version}/{dataset}/{table}"
     )
-
     q = f"""
     select
         *
     from {table_db_name}
     limit (?)
     """
-    df = cast(pd.DataFrame, con.execute(q, parameters=[limit]).fetch_df())
-    # TODO: converting to lists and then ormjson is slow, we could instead
-    # convert to numpy arrays on which ormjson is super fast
-    return df.to_dict(orient="list")
+    query_result = con.execute(q, parameters=[limit])
+    return cast(pd.DataFrame, query_result.fetch_df())
 
 
 def _assert_single_variable(n, variable_id):
