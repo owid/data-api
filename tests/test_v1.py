@@ -1,4 +1,6 @@
+import pandas as pd
 from pathlib import Path
+import io
 
 from fastapi.testclient import TestClient
 
@@ -86,21 +88,42 @@ def test_metadata_for_backported_variable():
     }
 
 
-def test_data_for_etl_table():
+TEST_RESPONSE_JSON = {
+    "country": ["Afghanistan", "Afghanistan"],
+    "population": [3280000.0, 4207000.0],
+    "year": [1820, 1870],
+}
+
+
+def test_data_for_etl_table_json_format():
     # this test requires connection to the database, this is only temporary and will change once we start getting
     # metadata from the catalog instead of the database
     response = client.get(
-        "/v1/dataset/data/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
-        params={"limit": 2},
+        "/v1/dataset/data/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp.json",
+        params={"limit": 2, "columns": "year,country,population"},
     )
     assert response.status_code == 200
-    assert response.json() == {
-        "country": ["Afghanistan", "Afghanistan"],
-        "gdp": [None, None],
-        "gdp_per_capita": [None, None],
-        "population": [3280000.0, 4207000.0],
-        "year": [1820, 1870],
-    }
+    assert response.json() == TEST_RESPONSE_JSON
+
+
+def test_data_for_etl_table_csv_format():
+    response = client.get(
+        "/v1/dataset/data/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp.csv",
+        params={"limit": 2, "columns": "year,country,population"},
+    )
+    assert response.status_code == 200
+    df = pd.read_csv(io.StringIO(response.text))
+    assert df.to_dict(orient="list") == TEST_RESPONSE_JSON
+
+
+def test_data_for_etl_table_feather_format():
+    response = client.get(
+        "/v1/dataset/data/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp.feather",
+        params={"limit": 2, "columns": "year,country,population"},
+    )
+    assert response.status_code == 200
+    df = pd.read_feather(io.BytesIO(response.content))
+    assert df.to_dict(orient="list") == TEST_RESPONSE_JSON
 
 
 def test_metadata_for_etl_table():
@@ -199,3 +222,38 @@ def test_metadata_for_etl_table():
             "version": "2020-10-01",
         },
     }
+
+
+def test_search():
+    response = client.get(
+        "/v1/search",
+        params={"term": "population"},
+    )
+    assert response.status_code == 200
+    js = response.json()
+    assert js == [
+        {
+            "data_url": "/v1/dataset/data/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+            "dataset_title": "Maddison Project Database (GGDC, 2020)",
+            "match": 1.8276277047674334,
+            "metadata_url": "/v1/dataset/metadata/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+            "table_name": "maddison_gdp",
+            "variable_description": None,
+            "variable_name": "population",
+            "variable_title": "Population",
+        },
+        {
+            "data_url": "/v1/dataset/data/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+            "dataset_title": "Maddison Project Database (GGDC, 2020)",
+            "match": 1.5464542117262898,
+            "metadata_url": "/v1/dataset/metadata/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+            "table_name": "maddison_gdp",
+            "variable_description": "Gross domestic product measured in international-$ "
+            "using 2011 prices to adjust for price changes over "
+            "time (inflation) and price differences between "
+            "countries. Calculated by multiplying GDP per capita "
+            "with population.",
+            "variable_name": "gdp",
+            "variable_title": "GDP",
+        },
+    ]

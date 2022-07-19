@@ -1,3 +1,4 @@
+# TODO: rename this file to crawl.py (do it in a single commit to avoid conflicts)
 import json
 import urllib.error
 from collections.abc import Generator
@@ -68,6 +69,13 @@ def _load_table_data_into_db(m: MetaTableModel, table: Table, con):
     }
     for dtype_from, dtype_to in DTYPE_MAP.items():
         df = df.astype({c: dtype_to for c in df.select_dtypes(dtype_from).columns})
+
+    # convert all categoricals to string
+    # WARNING: we do this because we're unable to read feather files with categoricals with pandas
+    # see https://github.com/duckdb/duckdb/issues/4130
+    # converting to string can have serious performance implications!
+    # check out the issue for guidance how to transform arrow format to support this
+    df = df.astype({k: "string" for k in df.select_dtypes("category").columns})
 
     con.execute("register", ("t", df))
     con.execute(f"CREATE OR REPLACE TABLE {m.table_db_name} AS SELECT * FROM t")
@@ -260,7 +268,13 @@ def main(
             # save dataset metadata alongside table, we could also create a separate table for datasets
             ds = data_table.metadata.dataset
             assert ds is not None
+
+            # TODO: backported datasets have currently NaN version, remove this once we fix change that in ETL to `latest`
+            if catalog_row.channel == "backport":
+                ds.version = "latest"
+
             assert ds.short_name
+            assert ds.version is not None
 
             # update dataset by deleting and recreating new one
             # TODO: channel should be ideally property of DatasetMeta

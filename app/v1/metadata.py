@@ -5,7 +5,7 @@ from typing import Any, Dict, cast
 import numpy as np
 import pandas as pd
 import structlog
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app import utils
 
@@ -45,10 +45,13 @@ def metadata_for_etl_variable(
     tf = _metadata_etl_table(con, table_path)
     df = _metadata_etl_dataset(con, channel, namespace, version, dataset)
 
+    if df.empty:
+        raise HTTPException(status_code=404, detail=f"table `{table_path}` not found")
+
     return {
-        "variables": vf.to_dict(orient="records"),
-        "table": tf.iloc[0].to_dict(),
         "dataset": df.iloc[0].to_dict(),
+        "table": tf.iloc[0].to_dict(),
+        "variables": vf.to_dict(orient="records"),
     }
 
 
