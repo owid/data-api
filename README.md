@@ -37,6 +37,8 @@ Sample queries written in [httpie](https://httpie.io/)
 - http GET http://127.0.0.1:8000/health
 - http GET http://127.0.0.1:8000/v1/variableById/data/42539
 - http GET http://127.0.0.1:8000/v1/variableById/metadata/42539
+- http GET http://127.0.0.1:8000/v1/dataset/data/backport/owid/latest/dataset_5220_covid_19__johns_hopkins_university/dataset_5220_covid_19__johns_hopkins_university.csv
+- http GET http://127.0.0.1:8000/v1/dataset/metadata/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp
 - http POST http://127.0.0.1:8000/v1/sql sql=="PRAGMA show_tables;" type==csv
 - http POST http://127.0.0.1:8000/v1/sql sql=="select * from garden__ggdc__2020_10_01__ggdc_maddison__maddison_gdp limit 10;" type==csv
 

@@ -36,7 +36,7 @@ def search(term: str, type: SearchType = SearchType.variable, limit: int = 10):
 
     # TODO: implement search on other tables too? not sure whether we'll need it yet
     if type != SearchType.variable:
-        raise NotImplementedError()
+        raise NotImplementedError(f"Invalid search type {type}, only searching variables is currently supported")
 
     # sample search
     q = f"""

@@ -74,6 +74,7 @@ def _load_table_data_into_db(m: MetaTableModel, table: Table, con):
     # WARNING: we do this because we're unable to read feather files with categoricals with pandas
     # see https://github.com/duckdb/duckdb/issues/4130
     # converting to string can have serious performance implications!
+    # check out the issue for guidance how to transform arrow format to support this
     df = df.astype({k: "string" for k in df.select_dtypes("category").columns})
 
     con.execute("register", ("t", df))
