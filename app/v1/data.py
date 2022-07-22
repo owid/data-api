@@ -55,6 +55,9 @@ def _sql_to_response(
     # read data in feather format and return it directly in response
     # NOTE: should be the fastest in theory, but is really slow for unknown reasons
     if type == "feather_direct":
+        # WARNING: this does not support categorical variables and raises `pyarrow.lib.ArrowTypeError`
+        # when you try to read it with pandas (see https://github.com/duckdb/duckdb/issues/4130)
+        # we'd have to either convert categoricals into strings or change format while still in arrow format
         bytes_io = _read_sql_bytes(con, sql, parameters=parameters)
         return _bytes_to_response(bytes_io)
 
@@ -76,6 +79,10 @@ def _sql_to_response(
 
     # read data into dataframe and then convert to json
     elif type == "json":
+        # NOTE: we could also do this directly from pyarrow, but it is slower than to pandas
+        # for some reason
+        # return con.execute(sql, parameters=parameters).fetch_arrow_table().to_pydict()
+
         df = con.execute(sql, parameters=parameters).fetch_df()
 
         # TODO: converting to lists and then ormjson is slow, we could instead
@@ -137,6 +144,11 @@ def data_for_backported_variable(variable_id: int, limit: Optional[int] = None):
     return df.to_dict(orient="list")
 
 
+# NOTE: it might be more intuitive to have paths like this
+#   /dataset/{channel}/{namespace}/{version}/{dataset}/{table}/data.{type}
+#  and
+#   /dataset/{channel}/{namespace}/{version}/{dataset}/{table}/metadata
+#  especially for browsing catalog tree in `lists.py`
 @router.get(
     "/dataset/data/{channel}/{namespace}/{version}/{dataset}/{table}.{type}",
 )

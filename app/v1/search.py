@@ -1,22 +1,12 @@
-import json
 import threading
-from typing import Any, Dict, cast
-from matplotlib.pyplot import title
+from enum import Enum
 
-import numpy as np
-import pandas as pd
 import structlog
 from fastapi import APIRouter
-from enum import Enum
 
 from app import utils
 
-from .schemas import (
-    Dimension,
-    DimensionProperties,
-    VariableMetadataResponse,
-    VariableSource,
-)
+from .schemas import SearchResponseList
 
 log = structlog.get_logger()
 
@@ -30,7 +20,11 @@ class SearchType(str, Enum):
     dataset = "meta_datasets"
 
 
-@router.get("/search")
+@router.get(
+    "/search",
+    response_model=SearchResponseList,
+    response_model_exclude_unset=True,
+)
 def search(term: str, type: SearchType = SearchType.variable, limit: int = 10):
     con = utils.get_readonly_connection(threading.get_ident())
 
@@ -45,6 +39,7 @@ def search(term: str, type: SearchType = SearchType.variable, limit: int = 10):
     SELECT
         v.short_name as variable_name,
         v.title as variable_title,
+        v.unit as variable_unit,
         v.description as variable_description,
         t.table_name,
         t.path as table_path,
@@ -64,4 +59,4 @@ def search(term: str, type: SearchType = SearchType.variable, limit: int = 10):
 
     matches = matches.drop(columns=["table_path"])
 
-    return matches.to_dict(orient="records")
+    return {"results": matches.to_dict(orient="records")}

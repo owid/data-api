@@ -1,5 +1,4 @@
 # TODO: rename this file to crawl.py (do it in a single commit to avoid conflicts)
-import json
 import urllib.error
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -15,6 +14,8 @@ from owid.catalog.catalogs import CatalogFrame, CatalogSeries
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm.session import Session
 
+from full_text_index import main as create_full_text_index
+
 log = structlog.get_logger()
 
 
@@ -24,17 +25,11 @@ CATEGORY_NAN = "-"
 
 def _load_catalog_frame(channels=()) -> CatalogFrame:
     frame = RemoteCatalog(channels=channels).frame
-    # TODO: move dimension parsing into CatalogFrame
-    frame["dimensions"] = frame["dimensions"].map(json.loads)
 
     # only public data
     frame = frame.loc[frame["is_public"]]
 
     return frame
-
-
-def _omit_nullable_values(d: dict) -> dict:
-    return {k: v for k, v in d.items() if v or v == 0}
 
 
 def _fillna_for_categories(df: pd.DataFrame) -> pd.DataFrame:
@@ -70,12 +65,8 @@ def _load_table_data_into_db(m: MetaTableModel, table: Table, con):
     for dtype_from, dtype_to in DTYPE_MAP.items():
         df = df.astype({c: dtype_to for c in df.select_dtypes(dtype_from).columns})
 
-    # convert all categoricals to string
-    # WARNING: we do this because we're unable to read feather files with categoricals with pandas
-    # see https://github.com/duckdb/duckdb/issues/4130
-    # converting to string can have serious performance implications!
-    # check out the issue for guidance how to transform arrow format to support this
-    df = df.astype({k: "string" for k in df.select_dtypes("category").columns})
+    # NOTE: Int64 type is stored in DuckDB as NULLABLE BIGINT, because it is nullable
+    # calling `fetch_df` on a query converts it to float64 instead of Int64 which is confusing
 
     con.execute("register", ("t", df))
     con.execute(f"CREATE OR REPLACE TABLE {m.table_db_name} AS SELECT * FROM t")
@@ -123,6 +114,10 @@ def _parse_meta_variable(
     dataset_short_name: str,
     engine: Engine,
 ) -> MetaVariableModel:
+    # sometimes `unit` is missing, but there is display.unit
+    if (var_meta.unit == "") or pd.isnull(var_meta):
+        var_meta.unit = (var_meta.display or {}).get("unit")
+
     v = MetaVariableModel(
         title=var_meta.title,
         description=var_meta.description,
@@ -225,10 +220,11 @@ def main(
     frame = _load_catalog_frame(channels=("backport", "garden"))
 
     # TODO: hotfix, remove after we fix this in ETL
-    frame = cast(CatalogFrame, frame.dropna(subset=["dataset"]))
+    # NOTE: this should be fixed, right?
+    # frame = cast(CatalogFrame, frame.dropna(subset=["dataset"]))
 
     if include:
-        frame = frame.loc[frame.dataset.str.match(include)]
+        frame = frame.loc[frame.dataset.str.contains(include)]
 
     table_paths_to_delete, table_paths_to_create = _tables_updates(
         engine, frame, force, include
@@ -255,23 +251,27 @@ def main(
 
         data_table = _load_data_from_catalog(catalog_row)
 
+        # delete table and variables before creating them if they exist
+        # TODO: remove dataset too if there are no remaining tables
+        if t.path in table_paths_to_delete:
+            with new_session(engine) as session:
+                _delete_tables(t.path, session)
+            table_paths_to_delete.remove(t.path)
+
         with new_session(engine) as session:
             # add table
             session.add(t)
-
-            # delete table and variables before creating them if they exist
-            if t.path in table_paths_to_delete:
-                with new_session(engine) as session:
-                    _delete_tables(t.path, session)
-                table_paths_to_delete.remove(t.path)
 
             # save dataset metadata alongside table, we could also create a separate table for datasets
             ds = data_table.metadata.dataset
             assert ds is not None
 
-            # TODO: backported datasets have currently NaN version, remove this once we fix change that in ETL to `latest`
+            # exceptions for backported channel
             if catalog_row.channel == "backport":
                 ds.version = "latest"
+                # all backported datasets are currently saved under `owid` namespace, we could be saving them in their
+                # real namespaces, but that would imply non-trivial changes to backporting code in ETL
+                ds.namespace = "owid"
 
             assert ds.short_name
             assert ds.version is not None
@@ -310,6 +310,9 @@ def main(
             log.info("table.delete_tables", n=len(table_paths_to_delete))
             for table_path in table_paths_to_delete:
                 _delete_tables(table_path, session)
+
+    # recreate full-text search index (this has to be run on every new dataset)
+    create_full_text_index(duckdb_path)
 
 
 @contextmanager

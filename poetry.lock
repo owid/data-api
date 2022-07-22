@@ -1,12 +1,4 @@
 [[package]]
-name = "aiofiles"
-version = "0.8.0"
-description = "File support for asyncio."
-category = "main"
-optional = false
-python-versions = ">=3.6,<4.0"
-
-[[package]]
 name = "appnope"
 version = "0.1.3"
 description = "Disable App Nap on macOS >= 10.9"
@@ -1304,10 +1296,9 @@ python-versions = "*"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.9"
-content-hash = "7d73fd7046a72937729678c25f5d3e60bd52e5ddf105a13e5501a9f061664817"
+content-hash = "ba6c40e65706faf75273aad90d28e10637df79011ab3afd6b0f894a83038eea7"
 
 [metadata.files]
-aiofiles = []
 appnope = [
     {file = "appnope-0.1.3-py2.py3-none-any.whl", hash = "sha256:265a455292d0bd8a72453494fa24df5a11eb18373a60c7c0430889f22548605e"},
     {file = "appnope-0.1.3.tar.gz", hash = "sha256:02bd91c4de869fbb1e1c50aafc4098827a7a54ab2f39d9dcba6c9547ed920e24"},

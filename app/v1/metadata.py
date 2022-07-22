@@ -187,7 +187,9 @@ def _metadata_etl_variables(con, table_path):
         v.sources,
         v.unit,
         v.short_unit,
-        -- v.display,
+        -- conversion factor from display is needed for CO2 datasets, but honestly it would be
+        -- better to hide it or do the calculation implicitly
+        v.display,
         -- v.grapher_meta,
         -- v.variable_id,
         v.short_name,
@@ -205,7 +207,7 @@ def _metadata_etl_variables(con, table_path):
     vf = cast(pd.DataFrame, con.execute(q, parameters=[table_path]).fetch_df())
 
     # convert JSON to dict (should be done automatically once we switch to ORM)
-    for col in ("licenses", "sources"):
+    for col in ("licenses", "sources", "display"):
         vf[col] = vf[col].apply(json.loads)
     return vf
 

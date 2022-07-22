@@ -18,7 +18,7 @@ def test_health():
     assert response.json()["status"] == "ok"
 
 
-def test_data_for_variable():
+def test_variableById_data_for_variable():
     response = client.get("/v1/variableById/data/42539")
     assert response.status_code == 200
     assert set(response.json().keys()) == {
@@ -30,7 +30,7 @@ def test_data_for_variable():
     }
 
 
-def test_metadata_for_backported_variable():
+def test_variableById_metadata_for_backported_variable():
     # this test requires connection to the database, this is only temporary and will change once we start getting
     # metadata from the catalog instead of the database
     response = client.get("/v1/variableById/metadata/42539")
@@ -95,7 +95,7 @@ TEST_RESPONSE_JSON = {
 }
 
 
-def test_data_for_etl_table_json_format():
+def test_dataset_data_for_etl_table_json_format():
     # this test requires connection to the database, this is only temporary and will change once we start getting
     # metadata from the catalog instead of the database
     response = client.get(
@@ -106,7 +106,7 @@ def test_data_for_etl_table_json_format():
     assert response.json() == TEST_RESPONSE_JSON
 
 
-def test_data_for_etl_table_csv_format():
+def test_dataset_data_for_etl_table_csv_format():
     response = client.get(
         "/v1/dataset/data/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp.csv",
         params={"limit": 2, "columns": "year,country,population"},
@@ -116,7 +116,7 @@ def test_data_for_etl_table_csv_format():
     assert df.to_dict(orient="list") == TEST_RESPONSE_JSON
 
 
-def test_data_for_etl_table_feather_format():
+def test_dataset_data_for_etl_table_feather_format():
     response = client.get(
         "/v1/dataset/data/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp.feather",
         params={"limit": 2, "columns": "year,country,population"},
@@ -126,7 +126,7 @@ def test_data_for_etl_table_feather_format():
     assert df.to_dict(orient="list") == TEST_RESPONSE_JSON
 
 
-def test_metadata_for_etl_table():
+def test_dataset_metadata_for_etl_table():
     response = client.get(
         "/v1/dataset/metadata/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
         params={"limit": 2},
@@ -138,60 +138,6 @@ def test_metadata_for_etl_table():
     js["dataset"]["description"] = js["dataset"]["description"][:20]
 
     assert js == {
-        "variables": [
-            {
-                "title": "GDP per capita",
-                "description": None,
-                "licenses": [],
-                "sources": [],
-                "unit": "2011 int-$",
-                "short_unit": "$",
-                "short_name": "gdp_per_capita",
-                "table_path": "garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
-                "table_db_name": "garden__ggdc__2020_10_01__ggdc_maddison__maddison_gdp",
-                "dataset_short_name": "ggdc_maddison",
-                "variable_type": "FLOAT",
-            },
-            {
-                "title": "Population",
-                "description": None,
-                "licenses": [],
-                "sources": [],
-                "unit": "people",
-                "short_unit": None,
-                "short_name": "population",
-                "table_path": "garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
-                "table_db_name": "garden__ggdc__2020_10_01__ggdc_maddison__maddison_gdp",
-                "dataset_short_name": "ggdc_maddison",
-                "variable_type": "FLOAT",
-            },
-            {
-                "title": "GDP",
-                "description": "Gross domestic product measured in international-$ using 2011 prices to adjust for price changes over time (inflation) and price differences between countries. Calculated by multiplying GDP per capita with population.",
-                "licenses": [],
-                "sources": [],
-                "unit": "2011 int-$",
-                "short_unit": "$",
-                "short_name": "gdp",
-                "table_path": "garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
-                "table_db_name": "garden__ggdc__2020_10_01__ggdc_maddison__maddison_gdp",
-                "dataset_short_name": "ggdc_maddison",
-                "variable_type": "FLOAT",
-            },
-        ],
-        "table": {
-            "table_name": "maddison_gdp",
-            "dataset_name": "ggdc_maddison",
-            "table_db_name": "garden__ggdc__2020_10_01__ggdc_maddison__maddison_gdp",
-            "version": "2020-10-01",
-            "namespace": "ggdc",
-            "channel": "garden",
-            "checksum": "7236fb37ff655adc0d9924a9e79937ed",
-            "dimensions": ["country", "year"],
-            "path": "garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
-            "format": "feather",
-            "is_public": True,
-        },
         "dataset": {
             "channel": "garden",
             "namespace": "ggdc",
@@ -221,7 +167,80 @@ def test_metadata_for_etl_table():
             "source_checksum": "a63167b871d470beb15546b565ed2185",
             "version": "2020-10-01",
         },
+        "table": {
+            "table_name": "maddison_gdp",
+            "dataset_name": "ggdc_maddison",
+            "table_db_name": "garden__ggdc__2020_10_01__ggdc_maddison__maddison_gdp",
+            "version": "2020-10-01",
+            "namespace": "ggdc",
+            "channel": "garden",
+            "checksum": "7236fb37ff655adc0d9924a9e79937ed",
+            "dimensions": ["country", "year"],
+            "path": "garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+            "format": "feather",
+            "is_public": True,
+        },
+        "variables": [
+            {
+                "title": "GDP per capita",
+                "description": None,
+                "licenses": [],
+                "sources": [],
+                "unit": "2011 int-$",
+                "short_unit": "$",
+                "display": {
+                    "entityAnnotationsMap": "Western Offshoots: United States, Canada, Australia and New Zealand",
+                    "numDecimalPlaces": 0,
+                },
+                "short_name": "gdp_per_capita",
+                "table_path": "garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+                "table_db_name": "garden__ggdc__2020_10_01__ggdc_maddison__maddison_gdp",
+                "dataset_short_name": "ggdc_maddison",
+                "variable_type": "FLOAT",
+            },
+            {
+                "title": "Population",
+                "description": None,
+                "licenses": [],
+                "sources": [],
+                "unit": "people",
+                "short_unit": None,
+                "display": {
+                    "entityAnnotationsMap": "Western Offshoots: United States, Canada, Australia and New Zealand"
+                },
+                "short_name": "population",
+                "table_path": "garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+                "table_db_name": "garden__ggdc__2020_10_01__ggdc_maddison__maddison_gdp",
+                "dataset_short_name": "ggdc_maddison",
+                "variable_type": "FLOAT",
+            },
+            {
+                "title": "GDP",
+                "description": "Gross domestic product measured in international-$ using 2011 prices to adjust for price changes over time (inflation) and price differences between countries. Calculated by multiplying GDP per capita with population.",
+                "licenses": [],
+                "sources": [],
+                "unit": "2011 int-$",
+                "short_unit": "$",
+                "display": {
+                    "entityAnnotationsMap": "Western Offshoots: United States, Canada, Australia and New Zealand",
+                    "numDecimalPlaces": 0,
+                },
+                "short_name": "gdp",
+                "table_path": "garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+                "table_db_name": "garden__ggdc__2020_10_01__ggdc_maddison__maddison_gdp",
+                "dataset_short_name": "ggdc_maddison",
+                "variable_type": "FLOAT",
+            },
+        ],
     }
+
+
+def test_dataset_metadata_for_backported_table():
+    response = client.get(
+        "/v1/dataset/metadata/backport/owid/latest/dataset_941_technology_adoption__isard__1942__and_others/dataset_941_technology_adoption__isard__1942__and_others",
+    )
+    assert response.status_code == 200
+    response.json()
 
 
 def test_search():
@@ -231,29 +250,51 @@ def test_search():
     )
     assert response.status_code == 200
     js = response.json()
-    assert js == [
-        {
-            "data_url": "/v1/dataset/data/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
-            "dataset_title": "Maddison Project Database (GGDC, 2020)",
-            "match": 1.8276277047674334,
-            "metadata_url": "/v1/dataset/metadata/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
-            "table_name": "maddison_gdp",
-            "variable_description": None,
-            "variable_name": "population",
-            "variable_title": "Population",
-        },
-        {
-            "data_url": "/v1/dataset/data/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
-            "dataset_title": "Maddison Project Database (GGDC, 2020)",
-            "match": 1.5464542117262898,
-            "metadata_url": "/v1/dataset/metadata/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
-            "table_name": "maddison_gdp",
-            "variable_description": "Gross domestic product measured in international-$ "
-            "using 2011 prices to adjust for price changes over "
-            "time (inflation) and price differences between "
-            "countries. Calculated by multiplying GDP per capita "
-            "with population.",
-            "variable_name": "gdp",
-            "variable_title": "GDP",
-        },
-    ]
+    assert js == {
+        "results": [
+            {
+                "variable_name": "population",
+                "variable_title": "Population",
+                "variable_description": "nan",
+                "variable_unit": "people",
+                "table_name": "dataset_5576_ggdc_maddison__2020_10_01",
+                "dataset_title": "ggdc_maddison__2020_10_01",
+                "metadata_url": "/v1/dataset/metadata/backport/owid/latest/dataset_5576_ggdc_maddison__2020_10_01/dataset_5576_ggdc_maddison__2020_10_01",
+                "data_url": "/v1/dataset/data/backport/owid/latest/dataset_5576_ggdc_maddison__2020_10_01/dataset_5576_ggdc_maddison__2020_10_01",
+                "match": 1.3584518922805233,
+            },
+            {
+                "variable_name": "population",
+                "variable_title": "Population",
+                "variable_description": "nan",
+                "variable_unit": "people",
+                "table_name": "maddison_gdp",
+                "dataset_title": "Maddison Project Database (GGDC, 2020)",
+                "metadata_url": "/v1/dataset/metadata/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+                "data_url": "/v1/dataset/data/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+                "match": 1.3584518922805233,
+            },
+            {
+                "variable_name": "gdp",
+                "variable_title": "GDP",
+                "variable_description": "Gross domestic product measured in international-$ using 2011 prices to adjust for price changes over time (inflation) and price differences between countries. Calculated by multiplying GDP per capita with population.",
+                "variable_unit": "2011 int-$",
+                "table_name": "maddison_gdp",
+                "dataset_title": "Maddison Project Database (GGDC, 2020)",
+                "metadata_url": "/v1/dataset/metadata/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+                "data_url": "/v1/dataset/data/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp",
+                "match": 1.1494592934681351,
+            },
+            {
+                "variable_name": "gdp",
+                "variable_title": "GDP",
+                "variable_description": "Gross domestic product measured in international-$ using 2011 prices to adjust for price changes over time (inflation) and price differences between countries. Calculated by multiplying GDP per capita with population.",
+                "variable_unit": "2011 int-$",
+                "table_name": "dataset_5576_ggdc_maddison__2020_10_01",
+                "dataset_title": "ggdc_maddison__2020_10_01",
+                "metadata_url": "/v1/dataset/metadata/backport/owid/latest/dataset_5576_ggdc_maddison__2020_10_01/dataset_5576_ggdc_maddison__2020_10_01",
+                "data_url": "/v1/dataset/data/backport/owid/latest/dataset_5576_ggdc_maddison__2020_10_01/dataset_5576_ggdc_maddison__2020_10_01",
+                "match": 0.6792259461402617,
+            },
+        ]
+    }

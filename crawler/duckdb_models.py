@@ -6,7 +6,6 @@ from owid.catalog.catalogs import CatalogSeries
 from sqlalchemy import JSON, Boolean, Column, Integer, String, create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
-
 from utils import sanitize_table_path
 
 Base = declarative_base()
@@ -88,6 +87,8 @@ class MetaTableModel(Base):  # type: ignore
     @classmethod
     def from_CatalogSeries(cls, catalog_row: CatalogSeries) -> "MetaTableModel":
         d = catalog_row.to_dict()
+
+        d["dimensions"] = list(d["dimensions"])
 
         # rename to adhere to DuckDB schema
         d["table_name"] = d.pop("table")
