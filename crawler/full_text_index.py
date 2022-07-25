@@ -19,6 +19,7 @@ def main(
         "title",
         "description",
         "variable_path",
+        "unit",
         "short_name",
     ]
     _create_full_text_search_index(con, "meta_variables", "variable_path", cols)

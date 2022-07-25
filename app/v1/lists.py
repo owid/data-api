@@ -9,6 +9,18 @@ router = APIRouter()
 
 
 @router.get(
+    "/datasets",
+)
+def list_all_datasets():
+    con = utils.get_readonly_connection(threading.get_ident())
+    sql = f"""
+    select title from meta_datasets
+    """
+    df = con.execute(sql).fetch_df()
+    return {"datasets": list(df.title)}
+
+
+@router.get(
     "/dataset/data",
 )
 def list_channels():

@@ -39,11 +39,11 @@ def _fillna_for_categories(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _load_table_data_into_db(m: MetaTableModel, table: Table, con):
+def _load_table_data_into_db(m: MetaTableModel, table: Table, con) -> pd.DataFrame:
     table_path = m.path
     # size_mb = table_path.stat().st_size / 1e6
     log.info(
-        "loading_table",
+        "loading_table.start",
         path=table_path,
         # size=f"{size_mb:.2f} MB",
         shape=table.shape,
@@ -70,6 +70,11 @@ def _load_table_data_into_db(m: MetaTableModel, table: Table, con):
 
     con.execute("register", ("t", df))
     con.execute(f"CREATE OR REPLACE TABLE {m.table_db_name} AS SELECT * FROM t")
+
+    log.info(
+        "loading_table.end",
+    )
+    return df
 
 
 def _variable_types(con, table_name) -> dict:
@@ -112,7 +117,7 @@ def _parse_meta_variable(
     short_name: str,
     variable_type: str,
     dataset_short_name: str,
-    engine: Engine,
+    data: pd.DataFrame,
 ) -> MetaVariableModel:
     # sometimes `unit` is missing, but there is display.unit
     if (var_meta.unit == "") or pd.isnull(var_meta):
@@ -139,29 +144,19 @@ def _parse_meta_variable(
         dataset_short_name=dataset_short_name,
     )
 
-    # NOTE: `read_sql` does not support categorical type, so we have to convert to varchar
-    cols = [f"{dim}::VARCHAR as {dim}" for dim in m.dimensions]
-
     # TODO: we end up with lot of duplicates across variables (especially for the huge backported datasets)
     #   how about we only do it for every dataset? (we'd be returning even years for which the given variable
     #   doesn't have any data)
-    q = f"""
-    select distinct
-        {','.join(cols)}
-    from {m.table_db_name} where {short_name} is not null
-    """
-
-    mf = pd.read_sql(q, engine)
-    v.dimension_values = {
-        k: sorted(set(v)) for k, v in mf.to_dict(orient="list").items()
-    }
+    v.dimension_values = {dim: sorted(set(data[dim].dropna())) for dim in m.dimensions}
 
     return v
 
 
 def _delete_tables(table_path: str, session: Session) -> None:
+    log.warning("deleting_table.start", path=table_path)
     session.query(MetaTableModel).filter_by(path=table_path).delete()
     session.query(MetaVariableModel).filter_by(table_path=table_path).delete()
+    log.warning("deleting_table.end", path=table_path)
 
 
 def _upsert_dataset(ds: DatasetMeta, channel: str, session: Session) -> None:
@@ -213,6 +208,7 @@ def main(
         None, help="Include datasets matching this regex"
     ),
     force: bool = False,
+    full_text_search: bool = True,
 ) -> None:
     """Bake ETL catalog into DuckDB."""
     engine = db_init(duckdb_path)
@@ -222,6 +218,8 @@ def main(
     # TODO: hotfix, remove after we fix this in ETL
     # NOTE: this should be fixed, right?
     # frame = cast(CatalogFrame, frame.dropna(subset=["dataset"]))
+
+    frame = frame[frame.channel == "garden"].copy()
 
     if include:
         frame = frame.loc[frame.dataset.str.contains(include)]
@@ -274,6 +272,9 @@ def main(
                 ds.namespace = "owid"
 
             assert ds.short_name
+            if not ds.version:
+                __import__("ipdb").set_trace()
+                print(21)
             assert ds.version is not None
 
             # update dataset by deleting and recreating new one
@@ -281,7 +282,7 @@ def main(
             _upsert_dataset(ds, str(t.channel), session)
 
             # load data into DuckDB
-            _load_table_data_into_db(t, data_table, engine)
+            data = _load_table_data_into_db(t, data_table, engine)
 
             # get variable types from DB
             # TODO: we could get it easily from `table`, but perhaps it is better from DB?
@@ -298,7 +299,7 @@ def main(
                     variable_short_name,
                     variable_types[variable_short_name],
                     ds.short_name,
-                    engine,
+                    data,
                 )
                 log.info(
                     "table.variable.create", path=t.path, variable=variable_short_name
@@ -311,8 +312,9 @@ def main(
             for table_path in table_paths_to_delete:
                 _delete_tables(table_path, session)
 
-    # recreate full-text search index (this has to be run on every new dataset)
-    create_full_text_index(duckdb_path)
+    if full_text_search:
+        # recreate full-text search index (this has to be run on every new dataset)
+        create_full_text_index(duckdb_path)
 
 
 @contextmanager

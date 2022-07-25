@@ -1,5 +1,3 @@
-import time
-from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -10,8 +8,10 @@ import yaml
 from pywebio import config
 from pywebio import input as pi
 from pywebio import output as po
-from pywebio import pin, start_server
-from pywebio.session import download, set_env
+from pywebio import pin as pn
+from pywebio import start_server
+from pywebio.pin import pin
+from pywebio.session import set_env
 
 from app.v1.schemas import SearchResponse
 
@@ -24,9 +24,9 @@ def _df_to_array(df: pd.DataFrame) -> list[list[Any]]:
     return [df.columns] + df.to_numpy().tolist()
 
 
-def _api_search(term) -> pd.DataFrame:
+def _api_search(term, channels) -> pd.DataFrame:
     url = f"{API_URL}/v1/search"
-    resp = requests.get(url, params={"term": term})
+    resp = requests.get(url, params={"term": term, "channels": channels})
     print(f"Searching for {term}...")
     return pd.DataFrame(resp.json()["results"])
 
@@ -44,6 +44,16 @@ max-width: {max_width};
 -webkit-box-orient: vertical;
 overflow: hidden;
 """
+
+
+def _list_channels() -> list[str]:
+    url = f"{API_URL}/v1/dataset/data"
+    return requests.get(url).json()["channels"]
+
+
+def _list_datasets() -> list[str]:
+    url = f"{API_URL}/v1/datasets"
+    return requests.get(url).json()["datasets"]
 
 
 def open_popup(choice, result: SearchResponse):
@@ -141,36 +151,52 @@ def open_popup(choice, result: SearchResponse):
         )
 
 
-# @config(css_file=(CURRENT_DIR / "style.css").as_posix())
+INIT_VALUES = {
+    "search_term": "cement",
+    "channels": ["garden", "backport"],
+}
+
+
 @config(css_file="static/style.css")
 def app():
+    channels = _list_channels()
+    datasets = _list_datasets()
+
     set_env(output_animation=False)
     po.put_markdown("""# OWID Data Catalog""")
-    po.put_markdown("""## Search term""")
-    pin.put_input("search_term", value="cement")
+    pn.put_input("search_term", value=INIT_VALUES["search_term"], label="Search term")
+    pn.put_select(
+        "channels",
+        label="Channels",
+        multiple=True,
+        options=channels,
+        value=INIT_VALUES["channels"],
+    )
+    pn.put_select(
+        "datasets",
+        label="Datasets",
+        multiple=True,
+        options=datasets,
+    )
 
     po.put_markdown("## Results")
 
     first = True
     while True:
         if first:
-            search_term = {"value": "cement"}
             first = False
+            # pn.search_term = "cement"
+            # pn.channels = ["garden", "backport"]
         else:
-            search_term = pin.pin_wait_change("search_term")
+            changed = pn.pin_wait_change("search_term", "channels")
+            print(changed)
 
         with po.use_scope("md", clear=True):
-            # po.put_markdown(search_term["value"], sanitize=False)
-            sf = _api_search(search_term["value"])
+            search_term = getattr(pin, "search_term", INIT_VALUES["search_term"])
+            channels = getattr(pin, "channels", INIT_VALUES["channels"])
+            sf = _api_search(search_term, channels=channels)
 
             if not sf.empty:
-
-                # sf["dataset"] = sf.apply(
-                #     lambda row: po.put_link(
-                #         row.dataset_title, API_URL + row.metadata_url
-                #     ),
-                #     axis=1,
-                # )
 
                 sf["actions"] = sf.apply(
                     lambda row: po.put_buttons(
@@ -196,6 +222,7 @@ def app():
                                 "variable_description",
                                 "variable_unit",
                                 "dataset_title",
+                                "channel",
                                 "match",
                                 "actions",
                             ]

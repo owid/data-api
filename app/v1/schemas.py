@@ -89,6 +89,7 @@ class SearchResponse(BaseModel):
     variable_unit: str
     table_name: str
     dataset_title: str
+    channel: str
     metadata_url: str
     data_url: str
     match: float

@@ -71,7 +71,6 @@ class MetaTableModel(Base):  # type: ignore
     version = Column(String)
     namespace = Column(String)
     channel = Column(String)
-    checksum = Column(String)
     dimensions = Column(JSON)
     path = Column(String)
     format = Column(String)
@@ -87,6 +86,9 @@ class MetaTableModel(Base):  # type: ignore
     @classmethod
     def from_CatalogSeries(cls, catalog_row: CatalogSeries) -> "MetaTableModel":
         d = catalog_row.to_dict()
+
+        # checksum from catalog is actually checksum of a dataset, not table!
+        del d["checksum"]
 
         d["dimensions"] = list(d["dimensions"])
 
