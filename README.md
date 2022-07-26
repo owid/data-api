@@ -13,7 +13,9 @@ make test
 
 ## Crawler
 
-Crawler is a script that goes through all backported datasets and replicates them to local DuckDB. It might be run as a [background task](https://fastapi.tiangolo.com/tutorial/background-tasks/) of an API in the future. Crawler creates tables `meta_tables` and `meta_variables` in DuckDB with all metadata and it also replicates tables from ETL catalog in there. Table names are underscored table paths, e.g. path `backport/owid/latest/dataset_941_technology_adoption__isard__1942__and_others/dataset_941_technology_adoption__isard__1942__and_others` gets table name `backport__owid__latest__dataset_941_technology_adoption__isard__1942__and_others__dataset_941_technology_adoption__isard__1942__and_others`. This is unnecessarily verbose, but it doesn't not matter now.
+Crawler is a script that goes through all backported datasets and replicates them to local DuckDB. It might be run as a [background task](https://fastapi.tiangolo.com/tutorial/background-tasks/) of an API in the future. Crawler creates tables `meta_datasets`, `meta_tables`, and `meta_variables` in DuckDB with all metadata and it also replicates tables from ETL catalog in there. Table names are underscored table paths, e.g. path `backport/owid/latest/dataset_941_technology_adoption__isard__1942__and_others/dataset_941_technology_adoption__isard__1942__and_others` gets table name `backport__owid__latest__dataset_941_technology_adoption__isard__1942__and_others__dataset_941_technology_adoption__isard__1942__and_others`. This is unnecessarily verbose, but it doesn't not matter now.
+
+Crawler compares checksums of **datasets** to decide if a dataset needs to be updated. We cannot do it on a table level because we don't use table checksums.
 
 We only crawl `garden` and `backport` channels right now.
 

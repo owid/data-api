@@ -57,10 +57,10 @@ def search(
         t.path as table_path,
         d.title as dataset_title,
         d.channel as channel,
-        fts_main_meta_variables.match_bm25(variable_path, ?) AS match
+        fts_main_meta_variables.match_bm25(v.path, ?) AS match
     FROM meta_variables as v
-    JOIN meta_datasets as d ON d.short_name = v.dataset_short_name
-    join meta_tables as t ON t.path = v.table_path
+    JOIN meta_tables as t ON t.path = v.table_path
+    JOIN meta_datasets as d ON d.path = t.dataset_path
     where match is not null
     {where}
     order by match desc

@@ -1,5 +1,6 @@
 # TODO: rename this file to crawl.py (do it in a single commit to avoid conflicts)
 import urllib.error
+import os
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -29,6 +30,9 @@ def _load_catalog_frame(channels=()) -> CatalogFrame:
     # only public data
     frame = frame.loc[frame["is_public"]]
 
+    # add dataset path
+    frame["dataset_path"] = frame.path.map(os.path.dirname)
+
     return frame
 
 
@@ -39,7 +43,7 @@ def _fillna_for_categories(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _load_table_data_into_db(m: MetaTableModel, table: Table, con) -> pd.DataFrame:
+def _load_table_data_into_db(m: MetaTableModel, table: Table, con) -> None:
     table_path = m.path
     # size_mb = table_path.stat().st_size / 1e6
     log.info(
@@ -74,7 +78,6 @@ def _load_table_data_into_db(m: MetaTableModel, table: Table, con) -> pd.DataFra
     log.info(
         "loading_table.end",
     )
-    return df
 
 
 def _variable_types(con, table_name) -> dict:
@@ -82,33 +85,40 @@ def _variable_types(con, table_name) -> dict:
     return mf.set_index("name")["type"].to_dict()
 
 
-def _tables_sync_actions(
-    engine: Engine, frame: CatalogFrame
+def _dataset_sync_actions(
+    engine: Engine, ds_path_to_checksum: dict[str, str]
 ) -> Tuple[Set[str], Set[str]]:
     q = """
     select
         path,
         checksum
-    from meta_tables
+    from meta_datasets
     """
     try:
         df = pd.read_sql(q, engine)
     except RuntimeError as e:
         if e.args[0].startswith(
-            "Catalog Error: Table with name meta_tables does not exist"
+            "Catalog Error: Table with name meta_datasets does not exist"
         ):
             df = pd.DataFrame(columns=["path", "checksum"])
         else:
             raise e
 
     # compute ids consisting of checksum and table name to know which ones to delete
-    db_ids = df.path + df.checksum
-    catalog_ids = frame.path + frame.checksum
+    db_ids = {r.path: r.checksum for r in df.itertuples()}
 
-    table_paths_to_delete = set(df.path[~db_ids.isin(catalog_ids)])
-    table_paths_to_create = set(frame.path[~catalog_ids.isin(db_ids)])
+    dataset_paths_to_delete = {
+        path
+        for path, checksum in db_ids.items()
+        if checksum != ds_path_to_checksum.get(path)
+    }
+    dataset_paths_to_create = {
+        path
+        for path, checksum in ds_path_to_checksum.items()
+        if checksum != db_ids.get(path)
+    }
 
-    return table_paths_to_delete, table_paths_to_create
+    return dataset_paths_to_delete, dataset_paths_to_create
 
 
 def _parse_meta_variable(
@@ -117,7 +127,7 @@ def _parse_meta_variable(
     short_name: str,
     variable_type: str,
     dataset_short_name: str,
-    data: pd.DataFrame,
+    data_table: Table,
 ) -> MetaVariableModel:
     # sometimes `unit` is missing, but there is display.unit
     if (var_meta.unit == "") or pd.isnull(var_meta):
@@ -147,43 +157,39 @@ def _parse_meta_variable(
     # TODO: we end up with lot of duplicates across variables (especially for the huge backported datasets)
     #   how about we only do it for every dataset? (we'd be returning even years for which the given variable
     #   doesn't have any data)
+    data = data_table.reset_index()
     v.dimension_values = {dim: sorted(set(data[dim].dropna())) for dim in m.dimensions}
 
     return v
 
 
-def _delete_tables(table_path: str, session: Session) -> None:
-    log.warning("deleting_table.start", path=table_path)
-    session.query(MetaTableModel).filter_by(path=table_path).delete()
-    session.query(MetaVariableModel).filter_by(table_path=table_path).delete()
-    log.warning("deleting_table.end", path=table_path)
+def _delete_dataset(path: str, session: Session) -> None:
+    session.query(MetaDatasetModel).filter_by(path=path).delete()
+    session.query(MetaTableModel).filter_by(dataset_path=path).delete()
+    session.query(MetaVariableModel).filter_by(dataset_path=path).delete()
 
 
-def _upsert_dataset(ds: DatasetMeta, channel: str, session: Session) -> None:
-    """Update dataset in DB."""
-    session.query(MetaDatasetModel).filter_by(short_name=ds.short_name).delete()
-    session.commit()
-    d = MetaDatasetModel.from_DatasetMeta(ds, channel)
-    session.add(d)
-    session.commit()
-
-
-def _tables_updates(
+def _datasets_updates(
     engine: Engine, frame: CatalogFrame, force: bool, include: Optional[str]
 ) -> Tuple[Set[str], Set[str]]:
+    # dataset path to checksum from frame
+    ds_path_to_checksum = {r.dataset_path: r.checksum for r in frame.itertuples()}
+
     if force:
-        table_paths_to_delete = table_paths_to_create = set(frame.path)
+        dataset_paths_to_delete = dataset_paths_to_create = set(
+            ds_path_to_checksum.keys()
+        )
     else:
         # which tables to delete and which to create
-        table_paths_to_delete, table_paths_to_create = _tables_sync_actions(
-            engine, frame
+        dataset_paths_to_delete, dataset_paths_to_create = _dataset_sync_actions(
+            engine, ds_path_to_checksum
         )
 
     # if using specific include pattern, don't delete any other datasets
     if include:
-        table_paths_to_delete = table_paths_to_delete & table_paths_to_create
+        dataset_paths_to_delete = dataset_paths_to_delete & dataset_paths_to_create
 
-    return table_paths_to_delete, table_paths_to_create
+    return dataset_paths_to_delete, dataset_paths_to_create
 
 
 def _load_data_from_catalog(catalog_row: CatalogSeries) -> Table:
@@ -215,102 +221,134 @@ def main(
 
     frame = _load_catalog_frame(channels=("backport", "garden"))
 
-    # TODO: hotfix, remove after we fix this in ETL
-    # NOTE: this should be fixed, right?
-    # frame = cast(CatalogFrame, frame.dropna(subset=["dataset"]))
+    # exclude huge datasets (we need to improve performance on them)
+    frame = frame[~frame.path.str.contains("garden/faostat/2022-05-17")]
+    frame = frame[~frame.path.str.contains("garden/un_sdg/2022-07-07/un_sdg")]
 
-    frame = frame[frame.channel == "garden"].copy()
+    # exclude missing versions
+    frame = frame[~frame.path.str.contains("garden/faostat/2021-04-09")]
+    frame = frame[~frame.path.str.contains("garden/owid/latest/key_indicators")]
+    frame = frame[~frame.path.str.contains("garden/owid/latest/population_density")]
+    frame = frame[
+        ~frame.path.str.contains("garden/sdg/latest/sdg/sustainable_development_goal")
+    ]
+
+    # weird error
+    frame = frame[
+        ~frame.path.str.contains("garden/shift/2022-07-18/fossil_fuel_production")
+    ]
+
+    # exclude special datasets
+    frame = frame[~frame.path.str.contains("garden/reference/")]
 
     if include:
-        frame = frame.loc[frame.dataset.str.contains(include)]
+        frame = frame.loc[frame.dataset_path.str.contains(include)]
 
-    table_paths_to_delete, table_paths_to_create = _tables_updates(
+    dataset_paths_to_delete, dataset_paths_to_create = _datasets_updates(
         engine, frame, force, include
     )
     log.info(
         "duckdb.actions",
-        delete_tables=len(table_paths_to_delete),
-        create_tables=len(table_paths_to_create),
+        delete_datasets=len(dataset_paths_to_delete),
+        create_datasets=len(dataset_paths_to_create),
     )
 
-    frame = frame.loc[frame.path.isin(table_paths_to_create)]
+    frame = frame.loc[frame.dataset_path.isin(dataset_paths_to_create)]
 
-    for i, (_, catalog_row) in enumerate(frame.iterrows()):
-        catalog_row = cast(CatalogSeries, catalog_row)
-
-        t = MetaTableModel.from_CatalogSeries(catalog_row)
-
+    for i, (dataset_path, dataset_frame) in enumerate(frame.groupby("dataset_path")):
         log.info(
-            "table.create",
-            path=t.path,
-            table_name=t.table_name,
+            "dataset.create",
+            path=dataset_path,
             progress=f"{i + 1}/{len(frame)}",
         )
-
-        data_table = _load_data_from_catalog(catalog_row)
-
-        # delete table and variables before creating them if they exist
-        # TODO: remove dataset too if there are no remaining tables
-        if t.path in table_paths_to_delete:
+        if dataset_path in dataset_paths_to_delete:
+            # delete everything before creating them if they exist
             with new_session(engine) as session:
-                _delete_tables(t.path, session)
-            table_paths_to_delete.remove(t.path)
+                _delete_dataset(dataset_path, session)
 
-        with new_session(engine) as session:
-            # add table
-            session.add(t)
+        # NOTE: we need to grab from the first table we load, only insert the dataset on
+        # the first table we load.
+        dataset_inserted = False
 
-            # save dataset metadata alongside table, we could also create a separate table for datasets
-            ds = data_table.metadata.dataset
-            assert ds is not None
+        for i, (_, catalog_row) in enumerate(dataset_frame.iterrows()):
 
-            # exceptions for backported channel
-            if catalog_row.channel == "backport":
-                ds.version = "latest"
-                # all backported datasets are currently saved under `owid` namespace, we could be saving them in their
-                # real namespaces, but that would imply non-trivial changes to backporting code in ETL
-                ds.namespace = "owid"
+            catalog_row = cast(CatalogSeries, catalog_row)
 
-            assert ds.short_name
-            if not ds.version:
-                __import__("ipdb").set_trace()
-                print(21)
-            assert ds.version is not None
+            t = MetaTableModel.from_CatalogSeries(catalog_row)
 
-            # update dataset by deleting and recreating new one
-            # TODO: channel should be ideally property of DatasetMeta
-            _upsert_dataset(ds, str(t.channel), session)
+            log.info(
+                "table.create",
+                path=t.path,
+                table_name=t.table_name,
+            )
 
-            # load data into DuckDB
-            data = _load_table_data_into_db(t, data_table, engine)
+            data_table = _load_data_from_catalog(catalog_row)
 
-            # get variable types from DB
-            # TODO: we could get it easily from `table`, but perhaps it is better from DB?
-            variable_types = _variable_types(engine, t.table_db_name)
+            with new_session(engine) as session:
+                # save dataset metadata alongside table, we could also create a separate table for datasets
+                ds = data_table.metadata.dataset
+                assert ds is not None
 
-            # table with variables
-            for variable_short_name, variable_meta in data_table._fields.items():
-                if variable_short_name in t.dimensions:
+                # exceptions for backported channel
+                if catalog_row.channel == "backport":
+                    ds.version = "latest"
+                    # all backported datasets are currently saved under `owid` namespace, we could be saving them in their
+                    # real namespaces, but that would imply non-trivial changes to backporting code in ETL
+                    ds.namespace = "owid"
+
+                assert ds.short_name
+                if not ds.version:
+                    log.error("missing.version", path=catalog_row["path"])
                     continue
 
-                v = _parse_meta_variable(
-                    variable_meta,
-                    t,
-                    variable_short_name,
-                    variable_types[variable_short_name],
-                    ds.short_name,
-                    data,
-                )
-                log.info(
-                    "table.variable.create", path=t.path, variable=variable_short_name
-                )
-                session.add(v)
+                # add table
+                session.add(t)
 
-        # delete the rest of the tables
-        if table_paths_to_delete:
-            log.info("table.delete_tables", n=len(table_paths_to_delete))
-            for table_path in table_paths_to_delete:
-                _delete_tables(table_path, session)
+                # create dataset
+                # TODO: channel should be ideally property of DatasetMeta
+                if not dataset_inserted:
+                    session.add(
+                        MetaDatasetModel.from_DatasetMeta(
+                            ds, dataset_path, dataset_checksum=catalog_row.checksum
+                        )
+                    )
+                    dataset_inserted = True
+
+                # load data into DuckDB
+                _load_table_data_into_db(t, data_table, engine)
+
+                # get variable types from DB
+                # NOTE: should we get it from data or from DB?
+                variable_types = _variable_types(engine, t.table_db_name)
+                # variable_types = data_table.reset_index().dtypes.astype(str).to_dict()
+
+                # table with variables
+                for variable_short_name, variable_meta in data_table._fields.items():
+                    if variable_short_name in t.dimensions:
+                        continue
+
+                    v = _parse_meta_variable(
+                        variable_meta,
+                        t,
+                        variable_short_name,
+                        variable_types[variable_short_name],
+                        ds.short_name,
+                        data_table,
+                    )
+                    log.info(
+                        "table.variable.create",
+                        path=t.path,
+                        variable=variable_short_name,
+                    )
+                    session.add(v)
+                    session.commit()
+
+    # delete the rest of the datasets
+    if dataset_paths_to_delete:
+        log.info("dataset.delete_datasets", n=len(dataset_paths_to_delete))
+        with new_session(engine) as session:
+            for dataset_path in dataset_paths_to_delete:
+                _delete_dataset(dataset_path, session)
 
     if full_text_search:
         # recreate full-text search index (this has to be run on every new dataset)
