@@ -103,6 +103,11 @@ def metadata_for_backported_variable(variable_id: int):
     # TODO: this is a hacky and slow way to do it, use ORM or proper dataclass instead
     df = cast(pd.DataFrame, con.execute(q, parameters=[variable_id]).fetch_df())
 
+    if df.empty:
+        raise HTTPException(
+            status_code=404, detail=f"variableId `{variable_id}` not found"
+        )
+
     # null values in JSON string functions end up as "null" string, fix that
     df = df.replace("null", np.nan)
     row = df.iloc[0].to_dict()

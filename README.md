@@ -57,7 +57,7 @@ python crawler/crawl.py --include 'garden'
 
 ### Running the API
 
-Copy `.env.example` into `.env` and update it as you like. After you build `duck.db` with crawler, run the API with `uvicorn app.main:app --reload`.
+Copy `.env.example` into `.env` and update it as you like. After you build `duck.db` with crawler, run the API with `hypercorn app.main:app --reload`.
 
 Docs are available at http://127.0.0.1:8000/v1/docs.
 

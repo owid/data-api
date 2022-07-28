@@ -59,7 +59,7 @@ crawl: .venv
 
 api: .venv
 	@echo '==> Running API'
-	.venv/bin/uvicorn app.main:app --reload --reload-dir app/
+	.venv/bin/hypercorn app.main:app --reload
 
 testdb: .venv
 	@echo '==> Rebuild test DB'
