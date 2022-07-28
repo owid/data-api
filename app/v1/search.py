@@ -1,5 +1,6 @@
 import threading
 from enum import Enum
+from typing import Optional
 
 import structlog
 from fastapi import APIRouter, Query
@@ -27,7 +28,7 @@ class SearchType(str, Enum):
 )
 def search(
     term: str,
-    channels: list[str] | None = Query(default=None),
+    channels: Optional[list[str]] = Query(default=None),
     type: SearchType = SearchType.variable,
     limit: int = 10,
 ):
