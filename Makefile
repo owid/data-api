@@ -17,6 +17,7 @@ help:
 	@echo '  make testdb    Rebuild test DB'
 	@echo '  make watch     Run all tests, watching for changes'
 	@echo '  make clobber   Delete non-reference data and .venv'
+	@echo '  make run       Run API and Catalog in the background
 	@echo
 
 
@@ -69,3 +70,10 @@ testdb: .venv
 clobber: clean
 	find . -name .venv | xargs rm -rf
 	find . -name .mypy_cache | xargs rm -rf
+
+run: .venv
+	@echo 'Running API and Catalog in the background:'
+	-kill $(lsof -t -i:8000)
+	-kill $(lsof -t -i:8001)
+	nohup make api > api.log 2> api.err < /dev/null &
+	nohup python -m demo.demo > demo.log 2> demo.err < /dev/null &

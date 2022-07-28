@@ -160,5 +160,10 @@ pyrightconfig.json
 ign.*
 .idea
 
+api.err
+demo.err
+api.log
+demo.log
+
 duck.db
 duck.db.wal
