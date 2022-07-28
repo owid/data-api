@@ -159,3 +159,6 @@ pyrightconfig.json
 .DS_Store
 ign.*
 .idea
+
+duck.db
+duck.db.wal
