@@ -1,12 +1,13 @@
+import json
 from pathlib import Path
 
+import pandas as pd
 import structlog
 from owid.catalog import DatasetMeta
 from owid.catalog.catalogs import CatalogSeries
 from sqlalchemy import JSON, Boolean, Column, Integer, String, create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
-
 from utils import sanitize_table_path
 
 Base = declarative_base()
@@ -26,15 +27,17 @@ class MetaDatasetModel(Base):  # type: ignore
     # TODO: what should we use as the primary key? either we use autoincremented ids or we
     # use paths (e.g. `garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp` is an address to table)
     # what are the pros and cons of each?
+    path = Column(String, primary_key=True)
 
     channel = Column(String)
     namespace = Column(String)
-    short_name = Column(String, primary_key=True)
+    short_name = Column(String)
     title = Column(String)
     description = Column(String)
     sources = Column(JSON)
     licenses = Column(JSON)
     is_public = Column(Boolean)
+    checksum = Column(String)
     source_checksum = Column(String)
     version = Column(String)
 
@@ -42,9 +45,12 @@ class MetaDatasetModel(Base):  # type: ignore
     grapher_meta = Column(JSON)
 
     @classmethod
-    def from_DatasetMeta(cls, ds: DatasetMeta, channel: str) -> "MetaDatasetModel":
+    def from_DatasetMeta(
+        cls, ds: DatasetMeta, dataset_path: str, dataset_checksum: str
+    ) -> "MetaDatasetModel":
         return MetaDatasetModel(
-            channel=channel,
+            path=dataset_path,
+            channel=dataset_path.split("/")[0],
             short_name=ds.short_name,
             namespace=ds.namespace,
             title=ds.title,
@@ -52,6 +58,7 @@ class MetaDatasetModel(Base):  # type: ignore
             sources=[source.to_dict() for source in ds.sources],
             licenses=[license.to_dict() for license in ds.licenses],
             is_public=ds.is_public,
+            checksum=dataset_checksum,
             source_checksum=ds.source_checksum,
             grapher_meta=ds.additional_info["grapher_meta"]
             if ds.additional_info
@@ -63,8 +70,10 @@ class MetaDatasetModel(Base):  # type: ignore
 class MetaTableModel(Base):  # type: ignore
     __tablename__ = "meta_tables"
 
-    # TODO: might be better to use ids as primary key instead of name?
-    table_name = Column(String, primary_key=True)
+    path = Column(String, primary_key=True)
+    dataset_path = Column(String)
+
+    table_name = Column(String)
     dataset_name = Column(String)
     table_db_name = Column(String)
 
@@ -72,9 +81,7 @@ class MetaTableModel(Base):  # type: ignore
     version = Column(String)
     namespace = Column(String)
     channel = Column(String)
-    checksum = Column(String)
     dimensions = Column(JSON)
-    path = Column(String)
     format = Column(String)
     is_public = Column(Boolean)
 
@@ -88,6 +95,11 @@ class MetaTableModel(Base):  # type: ignore
     @classmethod
     def from_CatalogSeries(cls, catalog_row: CatalogSeries) -> "MetaTableModel":
         d = catalog_row.to_dict()
+
+        # checksum from catalog is actually checksum of a dataset, not table!
+        del d["checksum"]
+
+        d["dimensions"] = list(d["dimensions"])
 
         # rename to adhere to DuckDB schema
         d["table_name"] = d.pop("table")
@@ -109,6 +121,8 @@ class MetaTableModel(Base):  # type: ignore
 class MetaVariableModel(Base):  # type: ignore
     __tablename__ = "meta_variables"
 
+    path = Column(String, primary_key=True)
+
     # columns from VariableMeta
     title = Column(String)
     description = Column(String)
@@ -121,12 +135,12 @@ class MetaVariableModel(Base):  # type: ignore
     # this is an attribute of additional_info['grapher_meta']
     grapher_meta = Column(JSON)
 
-    variable_path = Column(String, primary_key=True)
     variable_id = Column(Integer)
 
     # inferred columns by crawler
     short_name = Column(String)
     table_path = Column(String)
+    dataset_path = Column(String)
     table_db_name = Column(String)
     dataset_short_name = Column(String)
     variable_type = Column(String)
@@ -135,11 +149,23 @@ class MetaVariableModel(Base):  # type: ignore
     dimension_values = Column(JSON)
 
     def __init__(self, *args, **kwargs):
-        kwargs["variable_path"] = f"{kwargs['table_path']}/{kwargs['short_name']}"
+        kwargs["path"] = f"{kwargs['table_path']}/{kwargs['short_name']}"
         super().__init__(*args, **kwargs)
 
 
+class PdEncoder(json.JSONEncoder):
+    """Serialize non-native JSON objects."""
+
+    def default(self, obj):
+        if isinstance(obj, pd.Timestamp):
+            return str(obj)
+        return json.JSONEncoder.default(self, obj)
+
+
 def db_init(path: Path) -> Engine:
-    eng = create_engine(f"duckdb:///{path}")
+    eng = create_engine(
+        f"duckdb:///{path}",
+        json_serializer=lambda obj: json.dumps(obj, cls=PdEncoder),
+    )
     Base.metadata.create_all(eng)
     return eng

@@ -55,18 +55,16 @@ coverage: .venv
 
 crawl: .venv
 	@echo '==> Crawl ETL catalog'
-	python crawler/crawl_metadata.py
-	python crawler/full_text_index.py
+	python crawler/crawl.py
 
 api: .venv
 	@echo '==> Running API'
-	.venv/bin/uvicorn app.main:app --reload
+	.venv/bin/uvicorn app.main:app --reload --reload-dir app/
 
 testdb: .venv
 	@echo '==> Rebuild test DB'
 	rm -f tests/sample_duck.db
-	python crawler/crawl_metadata.py --include 'dataset_941|ggdc_maddison' --duckdb-path tests/sample_duck.db
-	python crawler/full_text_index.py --duckdb-path tests/sample_duck.db
+	python crawler/crawl.py --include 'dataset_941|ggdc_maddison' --duckdb-path tests/sample_duck.db
 
 clobber: clean
 	find . -name .venv | xargs rm -rf

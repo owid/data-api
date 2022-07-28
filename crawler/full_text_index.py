@@ -18,10 +18,11 @@ def main(
     cols = [
         "title",
         "description",
-        "variable_path",
+        "path",
+        "unit",
         "short_name",
     ]
-    _create_full_text_search_index(con, "meta_variables", "variable_path", cols)
+    _create_full_text_search_index(con, "meta_variables", "path", cols)
     log.info("table.full_text_index.end")
 
 

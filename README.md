@@ -13,14 +13,22 @@ make test
 
 ## Crawler
 
-Crawler is a script that goes through all backported datasets and replicates them to local DuckDB. It might be run as a [background task](https://fastapi.tiangolo.com/tutorial/background-tasks/) of an API in the future. Crawler creates tables `meta_tables` and `meta_variables` in DuckDB with all metadata and it also replicates tables from ETL catalog in there. Table names are underscored table paths, e.g. path `backport/owid/latest/dataset_941_technology_adoption__isard__1942__and_others/dataset_941_technology_adoption__isard__1942__and_others` gets table name `backport__owid__latest__dataset_941_technology_adoption__isard__1942__and_others__dataset_941_technology_adoption__isard__1942__and_others`. This is unnecessarily verbose, but it doesn't not matter now.
+Crawler is a script that goes through all backported datasets and replicates them to local DuckDB. It might be run as a [background task](https://fastapi.tiangolo.com/tutorial/background-tasks/) of an API in the future. Crawler creates tables `meta_datasets`, `meta_tables`, and `meta_variables` in DuckDB with all metadata and it also replicates tables from ETL catalog in there. Table names are underscored table paths, e.g. path `backport/owid/latest/dataset_941_technology_adoption__isard__1942__and_others/dataset_941_technology_adoption__isard__1942__and_others` gets table name `backport__owid__latest__dataset_941_technology_adoption__isard__1942__and_others__dataset_941_technology_adoption__isard__1942__and_others`. This is unnecessarily verbose, but it doesn't not matter now.
+
+Crawler compares checksums of **datasets** to decide if a dataset needs to be updated. We cannot do it on a table level because we don't use table checksums.
 
 We only crawl `garden` and `backport` channels right now.
 
-Run `make crawl` to crawl the entire database or crawl only sample datasets with
+Run `make crawl` to crawl the entire database (this would take veeeery long) or crawl only sample datasets with
 
 ```
-python crawler/crawl_metadata.py --include 'dataset_941|ggdc_maddison'
+python crawler/crawl.py --include 'dataset_941|ggdc_maddison'
+```
+
+or just a garden channel
+
+```
+python crawler/crawl.py --include 'garden'
 ```
 
 
@@ -34,13 +42,16 @@ Docs are available at http://127.0.0.1:8000/v1/docs.
 
 Sample queries written in [httpie](https://httpie.io/)
 
-- http GET http://127.0.0.1:8000/health
-- http GET http://127.0.0.1:8000/v1/variableById/data/42539
-- http GET http://127.0.0.1:8000/v1/variableById/metadata/42539
-- http GET http://127.0.0.1:8000/v1/dataset/data/backport/owid/latest/dataset_5220_covid_19__johns_hopkins_university/dataset_5220_covid_19__johns_hopkins_university.csv
-- http GET http://127.0.0.1:8000/v1/dataset/metadata/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp
-- http POST http://127.0.0.1:8000/v1/sql sql=="PRAGMA show_tables;" type==csv
-- http POST http://127.0.0.1:8000/v1/sql sql=="select * from garden__ggdc__2020_10_01__ggdc_maddison__maddison_gdp limit 10;" type==csv
+```
+http GET http://127.0.0.1:8000/health
+http GET http://127.0.0.1:8000/v1/variableById/data/42539
+http GET http://127.0.0.1:8000/v1/variableById/metadata/42539
+http GET http://127.0.0.1:8000/v1/dataset/data/garden/owid/latest/covid/covid.csv
+http GET http://127.0.0.1:8000/v1/dataset/metadata/garden/ggdc/2020-10-01/ggdc_maddison/maddison_gdp
+http GET http://127.0.0.1:8000/v1/dataset/data/backport/owid/latest/dataset_5576_ggdc_maddison__2020_10_01/dataset_5576_ggdc_maddison__2020_10_01.feather
+http POST http://127.0.0.1:8000/v1/sql sql=="PRAGMA show_tables;" type==csv
+http POST http://127.0.0.1:8000/v1/sql sql=="select * from garden__ggdc__2020_10_01__ggdc_maddison__maddison_gdp limit 10;" type==csv
+```
 
 ## Tests
 

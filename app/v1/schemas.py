@@ -80,3 +80,27 @@ class VariableMetadataResponse(BaseModel):
 
     class Config:
         extra = Extra.forbid
+
+
+class SearchResponse(BaseModel):
+    variable_name: str
+    variable_title: str
+    variable_description: str
+    variable_unit: str
+    table_name: str
+    dataset_title: str
+    channel: str
+    metadata_url: str
+    data_url: str
+    match: float
+
+    class Config:
+        extra = Extra.forbid
+
+
+class SearchResponseList(BaseModel):
+
+    results: List[SearchResponse]
+
+    class Config:
+        extra = Extra.forbid
