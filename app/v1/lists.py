@@ -13,7 +13,7 @@ router = APIRouter()
 )
 def list_all_datasets():
     con = utils.get_readonly_connection(threading.get_ident())
-    sql = f"""
+    sql = """
     select title from meta_datasets
     """
     df = con.execute(sql).fetch_df()
@@ -27,7 +27,7 @@ def list_channels():
     """List all available channels."""
 
     con = utils.get_readonly_connection(threading.get_ident())
-    sql = f"""
+    sql = """
     select distinct channel from meta_tables
     """
     df = con.execute(sql).fetch_df()
@@ -41,7 +41,7 @@ def list_namespaces(channel: str):
     """List all available namespaces."""
 
     con = utils.get_readonly_connection(threading.get_ident())
-    sql = f"""
+    sql = """
     select distinct namespace from meta_tables
     where channel = (?)
     """
@@ -56,7 +56,7 @@ def list_versions(channel: str, namespace: str):
     """List all available versions."""
 
     con = utils.get_readonly_connection(threading.get_ident())
-    sql = f"""
+    sql = """
     select distinct version from meta_tables
     where channel = (?) and namespace = (?)
     """
@@ -71,7 +71,7 @@ def list_datasets(channel: str, namespace: str, version: str):
     """List all available datasets."""
 
     con = utils.get_readonly_connection(threading.get_ident())
-    sql = f"""
+    sql = """
     select distinct dataset_name from meta_tables
     where channel = (?) and namespace = (?) and version = (?)
     """
@@ -86,7 +86,7 @@ def list_tables(channel: str, namespace: str, version: str, dataset: str):
     """List all available tables."""
 
     con = utils.get_readonly_connection(threading.get_ident())
-    sql = f"""
+    sql = """
     select distinct table_name from meta_tables
     where channel = (?) and namespace = (?) and version = (?) and dataset_name = (?)
     """
