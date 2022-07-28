@@ -140,6 +140,7 @@ class MetaVariableModel(Base):  # type: ignore
     # inferred columns by crawler
     short_name = Column(String)
     table_path = Column(String)
+    dataset_path = Column(String)
     table_db_name = Column(String)
     dataset_short_name = Column(String)
     variable_type = Column(String)

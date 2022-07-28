@@ -1,8 +1,9 @@
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
+import time
 import requests
 import yaml
 from pywebio import config
@@ -56,103 +57,180 @@ def _list_datasets() -> list[str]:
     return requests.get(url).json()["datasets"]
 
 
-def open_popup(choice, result: SearchResponse):
+def _put_table_preview(r: SearchResponse) -> None:
+    """Show data of search result in a table preview"""
+    t = time.time()
+    df = _api_etl_data(r.data_url, limit=20)
+    duration = time.time() - t
+
+    # limit number of columns
+    df = df.iloc[:, :10]
+
+    po.put_markdown(
+        f"""## Table {r.table_name} preview
+
+    Dataframe shape: {df.shape}
+    Dataframe size: {df.memory_usage().sum() / 1024 / 1024:.2f} MB
+    Latency of pd.read_feather: {duration:.3f} s
+    """
+    )
+    po.put_table(_df_to_array(df))
+
+
+ACTION_BUTTONS = Literal["Variable", "Table", "Code"]
+
+
+def _put_search_results_table(sf: pd.DataFrame) -> None:
+    sf["actions"] = sf.apply(
+        lambda row: po.put_buttons(
+            ACTION_BUTTONS.__args__,
+            onclick=partial(_open_popup, result=SearchResponse(**row.to_dict())),
+        ).style("min-width: 250px"),
+        axis=1,
+    )
+
+    # if title is missing, use short name
+    ix = sf["variable_title"] == "nan"
+    sf.loc[ix, "variable_title"] = sf.loc[ix, "variable_name"]
+
+    sf["variable_description"] = sf["variable_description"].map(
+        lambda s: po.put_text(s).style(_style_truncate())
+    )
+
+    sf["variable_title"] = sf["variable_title"].map(
+        lambda s: po.put_text(s).style(_style_truncate())
+    )
+
+    sf["match"] = sf["match"].round(3)
+
+    po.put_table(
+        _df_to_array(
+            sf[
+                [
+                    "variable_title",
+                    "variable_description",
+                    "variable_unit",
+                    "dataset_title",
+                    "channel",
+                    "match",
+                    "actions",
+                ]
+            ]
+        )
+    ).style("font-size: 14px;")
+
+
+def _popup_variable_details(result: SearchResponse):
     url = f"{API_URL}{result.metadata_url}"
     resp = requests.get(url)
     assert resp.ok
-
     js = resp.json()
 
+    meta = [v for v in js["variables"] if v["short_name"] == result.variable_name][0]
+
+    po.popup(
+        "Variable details",
+        [po.put_code(yaml.dump(meta), language="yaml")],
+        size=po.PopupSize.LARGE,
+    )
+
+
+def _popup_table_details(result: SearchResponse) -> None:
+    url = f"{API_URL}{result.metadata_url}"
+    resp = requests.get(url)
+    assert resp.ok
+    js = resp.json()
+
+    cols = ["title", "description", "unit"]
+    df = []
+    for v in js["variables"][:100]:
+        df.append({c: v[c] for c in cols})
+
+    del js["variables"]
+
+    po.popup(
+        "Table details",
+        [
+            po.put_code(yaml.dump(js), language="yaml"),
+            po.put_markdown("### Variables"),
+            po.put_table(_df_to_array(pd.DataFrame(df))).style("font-size: 14px;"),
+        ],
+        size=po.PopupSize.LARGE,
+    )
+
+
+def _popup_code_snippets(result: SearchResponse) -> None:
+    (
+        _,
+        _,
+        _,
+        _,
+        channel,
+        namespace,
+        version,
+        dataset,
+        table,
+    ) = result.metadata_url.split("/")
+    if channel == "backport":
+        catalog_snippet = f"""
+table = catalog.find_one(
+            table="{table}",
+            dataset="{dataset}",
+            channels=["backport"],
+        )""".strip()
+    else:
+        catalog_snippet = f"""
+table = catalog.find_one(
+            table="{table}",
+            namespace="{namespace}",
+            dataset="{dataset}",
+            channels=["{channel}"],
+        )""".strip()
+
+    po.popup(
+        "Code snippets",
+        [
+            po.put_markdown(
+                f"""
+        ### Fetch metadata from API
+        ```python
+        r = requests.get("{API_URL}{result.metadata_url}")
+        assert r.ok
+        metadata = r.json()
+        ```
+
+        ### Fetch data from API
+        ```python
+        df = pd.read_feather("{API_URL}{result.data_url}.feather")
+        df.head()
+        ```
+
+        ### Get table from Python API
+        ```python
+        from owid import catalog
+        {catalog_snippet}
+        table.head()
+        ```
+        """
+            )
+        ],
+        size=po.PopupSize.LARGE,
+    )
+
+
+def _open_popup(choice: ACTION_BUTTONS, result: SearchResponse):
     if choice == "Variable":
-        meta = [v for v in js["variables"] if v["short_name"] == result.variable_name][
-            0
-        ]
-
-        po.popup(
-            "Variable details",
-            [po.put_code(yaml.dump(meta), language="yaml")],
-            size=po.PopupSize.LARGE,
-        )
-
-    elif choice == "Dataset":
-        cols = ["title", "description", "unit"]
-        df = []
-        for v in js["variables"]:
-            df.append({c: v[c] for c in cols})
-
-        del js["variables"]
-
-        po.popup(
-            "Dataset details",
-            [
-                po.put_code(yaml.dump(js), language="yaml"),
-                po.put_markdown("### Variables"),
-                po.put_table(_df_to_array(pd.DataFrame(df))).style("font-size: 14px;"),
-            ],
-            size=po.PopupSize.LARGE,
-        )
-
+        _popup_variable_details(result)
+    elif choice == "Table":
+        _popup_table_details(result)
     elif choice == "Code":
-        (
-            _,
-            _,
-            _,
-            _,
-            channel,
-            namespace,
-            version,
-            dataset,
-            table,
-        ) = result.metadata_url.split("/")
-        if channel == "backport":
-            catalog_snippet = f"""
-    table = catalog.find_one(
-                table="{table}",
-                dataset="{dataset}",
-                channels=["backport"],
-            )""".strip()
-        else:
-            catalog_snippet = f"""
-    table = catalog.find_one(
-                table="{table}",
-                namespace="{namespace}",
-                dataset="{dataset}",
-                channels=["{channel}"],
-            )""".strip()
-
-        po.popup(
-            "Code snippets",
-            [
-                po.put_markdown(
-                    f"""
-            ### Fetch metadata from API
-            ```python
-            r = requests.get("{API_URL}{result.metadata_url}")
-            assert r.ok
-            metadata = r.json()
-            ```
-
-            ### Fetch data from API
-            ```python
-            df = pd.read_feather("{API_URL}{result.data_url}.feather")
-            df.head()
-            ```
-
-            ### Get table from Python API
-            ```python
-            from owid import catalog
-            {catalog_snippet}
-            table.head()
-            ```
-            """
-                )
-            ],
-            size=po.PopupSize.LARGE,
-        )
+        _popup_code_snippets(result)
+    else:
+        raise NotImplementedError()
 
 
 INIT_VALUES = {
-    "search_term": "cement",
+    "search_term": "gdp",
     "channels": ["garden", "backport"],
 }
 
@@ -181,74 +259,28 @@ def app():
 
     po.put_markdown("## Results")
 
-    first = True
+    last_search_term = None
     while True:
-        if first:
-            first = False
-            # pn.search_term = "cement"
-            # pn.channels = ["garden", "backport"]
+        # get search term inputs or channel
+        # NOTE: we need `timeout` together with last_search_term if user types too quickly
+        # and we don't get the input yet
+        pn.pin_wait_change("search_term", "channels", timeout=0.1)
+
+        if last_search_term == pin.search_term:
+            continue
         else:
-            changed = pn.pin_wait_change("search_term", "channels")
-            print(changed)
+            last_search_term = pin.search_term
 
         with po.use_scope("md", clear=True):
-            search_term = getattr(pin, "search_term", INIT_VALUES["search_term"])
-            channels = getattr(pin, "channels", INIT_VALUES["channels"])
+            search_term = pin.search_term
+            channels = pin.channels
             sf = _api_search(search_term, channels=channels)
 
             if not sf.empty:
+                _put_search_results_table(sf)
 
-                sf["actions"] = sf.apply(
-                    lambda row: po.put_buttons(
-                        ["Variable", "Dataset", "Code"],
-                        onclick=partial(
-                            open_popup, result=SearchResponse(**row.to_dict())
-                        ),
-                    ).style("min-width: 250px"),
-                    axis=1,
-                )
-
-                sf["variable_description"] = sf["variable_description"].map(
-                    lambda s: po.put_text(s).style(_style_truncate())
-                )
-
-                sf["match"] = sf["match"].round(3)
-
-                po.put_table(
-                    _df_to_array(
-                        sf[
-                            [
-                                "variable_title",
-                                "variable_description",
-                                "variable_unit",
-                                "dataset_title",
-                                "channel",
-                                "match",
-                                "actions",
-                            ]
-                        ]
-                    )
-                ).style("font-size: 14px;")
-
-                # # show top result
-                # r: SearchResponse = sf.iloc[0]
-
-                # t = time.time()
-                # df = _api_etl_data(r.data_url, limit=20)
-                # duration = time.time() - t
-
-                # # limit number of columns
-                # df = df.iloc[:, :10]
-
-                # po.put_markdown(
-                #     f"""## Table {r.table_name} preview
-
-                # Dataframe shape: {df.shape}
-                # Dataframe size: {df.memory_usage().sum() / 1024 / 1024:.2f} MB
-                # Latency of pd.read_feather: {duration:.3f} s
-                # """
-                # )
-                # po.put_table(_df_to_array(df))
+                # NOTE: not very useful, is going away soon
+                _put_table_preview(sf.iloc[0])
 
 
 if __name__ == "__main__":

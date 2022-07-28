@@ -221,7 +221,6 @@ def _metadata_etl_table(con, table_path):
         version,
         namespace,
         channel,
-        checksum,
         dimensions,
         path,
         format,
@@ -249,7 +248,7 @@ def _metadata_etl_dataset(con, channel, namespace, version, dataset):
         sources,
         licenses,
         is_public,
-        source_checksum,
+        checksum,
         version,
         -- grapher_meta
     FROM meta_datasets as d

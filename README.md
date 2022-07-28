@@ -19,10 +19,16 @@ Crawler compares checksums of **datasets** to decide if a dataset needs to be up
 
 We only crawl `garden` and `backport` channels right now.
 
-Run `make crawl` to crawl the entire database or crawl only sample datasets with
+Run `make crawl` to crawl the entire database (this would take veeeery long) or crawl only sample datasets with
 
 ```
-python crawler/crawl_metadata.py --include 'dataset_941|ggdc_maddison'
+python crawler/crawl.py --include 'dataset_941|ggdc_maddison'
+```
+
+or just a garden channel
+
+```
+python crawler/crawl.py --include 'garden'
 ```
 
 

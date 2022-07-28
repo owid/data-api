@@ -1,6 +1,5 @@
-# TODO: rename this file to crawl.py (do it in a single commit to avoid conflicts)
-import urllib.error
 import os
+import urllib.error
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -10,12 +9,11 @@ import pandas as pd
 import structlog
 import typer
 from duckdb_models import MetaDatasetModel, MetaTableModel, MetaVariableModel, db_init
-from owid.catalog import DatasetMeta, RemoteCatalog, Table, VariableMeta
+from full_text_index import main as create_full_text_index
+from owid.catalog import RemoteCatalog, Table, VariableMeta
 from owid.catalog.catalogs import CatalogFrame, CatalogSeries
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm.session import Session
-
-from full_text_index import main as create_full_text_index
 
 log = structlog.get_logger()
 
@@ -32,6 +30,27 @@ def _load_catalog_frame(channels=()) -> CatalogFrame:
 
     # add dataset path
     frame["dataset_path"] = frame.path.map(os.path.dirname)
+
+    # TODO: exclude large datasets (we need to improve their performance)
+    frame = frame[~frame.path.str.contains("garden/faostat/2022-05-17")]
+    # frame = frame[~frame.path.str.contains("garden/un_sdg/2022-07-07/un_sdg")]
+
+    # TODO: exclude datasets with missing versions
+    frame = frame[~frame.path.str.contains("garden/faostat/2021-04-09")]
+    frame = frame[~frame.path.str.contains("garden/owid/latest/key_indicators")]
+    frame = frame[~frame.path.str.contains("garden/owid/latest/population_density")]
+    frame = frame[
+        ~frame.path.str.contains("garden/sdg/latest/sdg/sustainable_development_goal")
+    ]
+    frame = frame[~frame.path.str.contains("garden/worldbank_wdi/2022-05-26/wdi/wdi")]
+
+    # TODO: weird error
+    frame = frame[
+        ~frame.path.str.contains("garden/shift/2022-07-18/fossil_fuel_production")
+    ]
+
+    # TODO: exclude special datasets for now
+    frame = frame[~frame.path.str.contains("garden/reference/")]
 
     return frame
 
@@ -128,12 +147,22 @@ def _parse_meta_variable(
     variable_type: str,
     dataset_short_name: str,
     data_table: Table,
+    dataset_path: str,
 ) -> MetaVariableModel:
     # sometimes `unit` is missing, but there is display.unit
     if (var_meta.unit == "") or pd.isnull(var_meta):
         var_meta.unit = (var_meta.display or {}).get("unit")
 
-    v = MetaVariableModel(
+    # TODO: we end up with lot of duplicates across variables (especially for the huge backported datasets)
+    #   how about we only do it for every dataset? (we'd be returning even years for which the given variable
+    #   doesn't have any data)
+    data = data_table[short_name].dropna()
+    dimension_values = {
+        dim: sorted(set(data.index.get_level_values(dim).dropna()))
+        for dim in data.index.names
+    }
+
+    return MetaVariableModel(
         title=var_meta.title,
         description=var_meta.description,
         licenses=[license.to_dict() for license in var_meta.licenses],
@@ -152,15 +181,9 @@ def _parse_meta_variable(
         table_db_name=m.table_db_name,
         variable_type=variable_type,
         dataset_short_name=dataset_short_name,
+        dataset_path=dataset_path,
+        dimension_values=dimension_values,
     )
-
-    # TODO: we end up with lot of duplicates across variables (especially for the huge backported datasets)
-    #   how about we only do it for every dataset? (we'd be returning even years for which the given variable
-    #   doesn't have any data)
-    data = data_table.reset_index()
-    v.dimension_values = {dim: sorted(set(data[dim].dropna())) for dim in m.dimensions}
-
-    return v
 
 
 def _delete_dataset(path: str, session: Session) -> None:
@@ -221,26 +244,6 @@ def main(
 
     frame = _load_catalog_frame(channels=("backport", "garden"))
 
-    # exclude huge datasets (we need to improve performance on them)
-    frame = frame[~frame.path.str.contains("garden/faostat/2022-05-17")]
-    frame = frame[~frame.path.str.contains("garden/un_sdg/2022-07-07/un_sdg")]
-
-    # exclude missing versions
-    frame = frame[~frame.path.str.contains("garden/faostat/2021-04-09")]
-    frame = frame[~frame.path.str.contains("garden/owid/latest/key_indicators")]
-    frame = frame[~frame.path.str.contains("garden/owid/latest/population_density")]
-    frame = frame[
-        ~frame.path.str.contains("garden/sdg/latest/sdg/sustainable_development_goal")
-    ]
-
-    # weird error
-    frame = frame[
-        ~frame.path.str.contains("garden/shift/2022-07-18/fossil_fuel_production")
-    ]
-
-    # exclude special datasets
-    frame = frame[~frame.path.str.contains("garden/reference/")]
-
     if include:
         frame = frame.loc[frame.dataset_path.str.contains(include)]
 
@@ -262,12 +265,12 @@ def main(
             progress=f"{i + 1}/{len(frame)}",
         )
         if dataset_path in dataset_paths_to_delete:
-            # delete everything before creating them if they exist
+            # delete everything related to a dataset before recreating them
             with new_session(engine) as session:
                 _delete_dataset(dataset_path, session)
 
-        # NOTE: we need to grab from the first table we load, only insert the dataset on
-        # the first table we load.
+        # NOTE: we need to grab from the first table we load, only insert the dataset
+        # when we process the first table
         dataset_inserted = False
 
         for i, (_, catalog_row) in enumerate(dataset_frame.iterrows()):
@@ -291,6 +294,7 @@ def main(
 
                 # exceptions for backported channel
                 if catalog_row.channel == "backport":
+                    # backported datasets are missing version
                     ds.version = "latest"
                     # all backported datasets are currently saved under `owid` namespace, we could be saving them in their
                     # real namespaces, but that would imply non-trivial changes to backporting code in ETL
@@ -314,7 +318,6 @@ def main(
                     )
                     dataset_inserted = True
 
-                # load data into DuckDB
                 _load_table_data_into_db(t, data_table, engine)
 
                 # get variable types from DB
@@ -323,25 +326,28 @@ def main(
                 # variable_types = data_table.reset_index().dtypes.astype(str).to_dict()
 
                 # table with variables
+                variables = []
                 for variable_short_name, variable_meta in data_table._fields.items():
                     if variable_short_name in t.dimensions:
                         continue
 
-                    v = _parse_meta_variable(
-                        variable_meta,
-                        t,
-                        variable_short_name,
-                        variable_types[variable_short_name],
-                        ds.short_name,
-                        data_table,
+                    variables.append(
+                        _parse_meta_variable(
+                            variable_meta,
+                            t,
+                            variable_short_name,
+                            variable_types[variable_short_name],
+                            ds.short_name,
+                            data_table,
+                            dataset_path,
+                        )
                     )
                     log.info(
                         "table.variable.create",
-                        path=t.path,
                         variable=variable_short_name,
                     )
-                    session.add(v)
-                    session.commit()
+
+                session.add_all(variables)
 
     # delete the rest of the datasets
     if dataset_paths_to_delete:
