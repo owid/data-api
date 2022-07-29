@@ -128,11 +128,11 @@ def data_for_backported_variable(variable_id: int, limit: Optional[int] = None):
     # is it even needed if we get them from our DB and it is read-only?
     q = f"""
     select
-        year,
-        entity_name,
-        entity_id,
-        entity_code,
-        {r["short_name"]} as value
+        year as years,
+        entity_name as entity_names,
+        entity_id as entities,
+        entity_code as entity_codes,
+        {r["short_name"]} as values
     from {r["table_db_name"]}
     where {r["short_name"]} is not null
     """
