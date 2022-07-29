@@ -5,11 +5,11 @@ from pydantic import BaseModel, Extra
 
 
 class VariableDataResponse(BaseModel):
-    year: List[int]
-    entity_name: List[str]
-    entity_id: List[int]
-    entity_code: List[str]
-    value: List[Any]
+    years: List[int]
+    entity_names: List[str]
+    entities: List[int]
+    entity_codes: List[str]
+    values: List[Any]
 
     class Config:
         extra = Extra.forbid
