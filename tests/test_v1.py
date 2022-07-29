@@ -22,11 +22,11 @@ def test_variableById_data_for_variable():
     response = client.get("/v1/variableById/data/42539")
     assert response.status_code == 200
     assert set(response.json().keys()) == {
-        "year",
-        "entity_name",
-        "entity_id",
-        "entity_code",
-        "value",
+        "years",
+        "entity_names",
+        "entities",
+        "entity_codes",
+        "values",
     }
 
 
