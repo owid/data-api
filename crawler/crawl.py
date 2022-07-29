@@ -158,7 +158,7 @@ def _parse_meta_variable(
     #   doesn't have any data)
     data = data_table[short_name].dropna()
     dimension_values = {
-        dim: sorted(set(data.index.get_level_values(dim).dropna()))
+        dim: sorted(set(data.index.get_level_values(dim)))
         for dim in data.index.names
     }
 
