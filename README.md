@@ -46,13 +46,13 @@ We only crawl `garden` and `backport` channels right now.
 Run `make crawl` to crawl the entire database (this would take veeeery long) or crawl only sample datasets with
 
 ```
-python crawler/crawl.py --include 'dataset_941|ggdc_maddison'
+crawl --include 'dataset_941|ggdc_maddison'
 ```
 
 or just a garden channel
 
 ```
-python crawler/crawl.py --include 'garden'
+crawl --include 'garden'
 ```
 
 ### Running the API
