@@ -3,17 +3,23 @@ import urllib.error
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional, Set, Tuple, cast
+from typing import Any, Optional, Set, Tuple, cast
 
 import pandas as pd
 import structlog
 import typer
-from duckdb_models import MetaDatasetModel, MetaTableModel, MetaVariableModel, db_init
-from full_text_index import main as create_full_text_index
 from owid.catalog import RemoteCatalog, Table, VariableMeta
 from owid.catalog.catalogs import CatalogFrame, CatalogSeries
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm.session import Session
+
+from crawler.duckdb_models import (
+    MetaDatasetModel,
+    MetaTableModel,
+    MetaVariableModel,
+    db_init,
+)
+from crawler.full_text_index import main as create_full_text_index
 
 log = structlog.get_logger()
 
@@ -146,21 +152,11 @@ def _parse_meta_variable(
     short_name: str,
     variable_type: str,
     dataset_short_name: str,
-    data_table: Table,
     dataset_path: str,
 ) -> MetaVariableModel:
     # sometimes `unit` is missing, but there is display.unit
     if (var_meta.unit == "") or pd.isnull(var_meta):
         var_meta.unit = (var_meta.display or {}).get("unit")
-
-    # TODO: we end up with lot of duplicates across variables (especially for the huge backported datasets)
-    #   how about we only do it for every dataset? (we'd be returning even years for which the given variable
-    #   doesn't have any data)
-    data = data_table[short_name].dropna()
-    dimension_values = {
-        dim: sorted(set(data.index.get_level_values(dim).dropna()))
-        for dim in data.index.names
-    }
 
     return MetaVariableModel(
         title=var_meta.title,
@@ -182,7 +178,6 @@ def _parse_meta_variable(
         variable_type=variable_type,
         dataset_short_name=dataset_short_name,
         dataset_path=dataset_path,
-        dimension_values=dimension_values,
     )
 
 
@@ -231,6 +226,35 @@ def _load_data_from_catalog(catalog_row: CatalogSeries) -> Table:
     return data_table
 
 
+def _extract_dimension_values(multiindex: pd.Index) -> dict[str, Any]:
+    dims_to_process = set(multiindex.names)
+
+    dimension_values = {}
+
+    # entities belong together and has to be stored as tuple `entity_id|entity_name|entity_code`
+    # NOTE: this might be generalized to any column name with `_id`, `_name`, `_code` suffix
+    if {"entity_id", "entity_name", "entity_code"} <= dims_to_process:
+        dims_to_process = dims_to_process - {"entity_id", "entity_name", "entity_code"}
+        index_vals = sorted(
+            set(
+                zip(
+                    multiindex.get_level_values("entity_id"),
+                    multiindex.get_level_values("entity_name"),
+                    multiindex.get_level_values("entity_code"),
+                )
+            )
+        )
+
+        dimension_values = {
+            "entity_zip": sorted(["|".join(map(str, x)) for x in index_vals]),
+        }
+
+    for dim in dims_to_process:
+        dimension_values[dim] = sorted(set(multiindex.get_level_values(dim)))
+
+    return dimension_values
+
+
 def main(
     duckdb_path: Path = Path("duck.db"),
     include: Optional[str] = typer.Option(
@@ -268,6 +292,7 @@ def main(
             # delete everything related to a dataset before recreating them
             with new_session(engine) as session:
                 _delete_dataset(dataset_path, session)
+            dataset_paths_to_delete.remove(dataset_path)
 
         # NOTE: we need to grab from the first table we load, only insert the dataset
         # when we process the first table
@@ -277,15 +302,20 @@ def main(
 
             catalog_row = cast(CatalogSeries, catalog_row)
 
-            t = MetaTableModel.from_CatalogSeries(catalog_row)
+            log.info(
+                "table.load_from_catalog",
+                path=catalog_row.path,
+            )
+            data_table = _load_data_from_catalog(catalog_row)
+
+            dimension_values = _extract_dimension_values(data_table.index)
+
+            t = MetaTableModel.from_CatalogSeries(catalog_row, dimension_values)
 
             log.info(
                 "table.create",
                 path=t.path,
-                table_name=t.table_name,
             )
-
-            data_table = _load_data_from_catalog(catalog_row)
 
             with new_session(engine) as session:
                 # save dataset metadata alongside table, we could also create a separate table for datasets
@@ -338,7 +368,6 @@ def main(
                             variable_short_name,
                             variable_types[variable_short_name],
                             ds.short_name,
-                            data_table,
                             dataset_path,
                         )
                     )

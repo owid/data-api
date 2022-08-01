@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import structlog
@@ -8,7 +9,8 @@ from owid.catalog.catalogs import CatalogSeries
 from sqlalchemy import JSON, Boolean, Column, Integer, String, create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
-from utils import sanitize_table_path
+
+from crawler.utils import sanitize_table_path
 
 Base = declarative_base()
 
@@ -85,6 +87,9 @@ class MetaTableModel(Base):  # type: ignore
     format = Column(String)
     is_public = Column(Boolean)
 
+    # distinct values of years and entities encoded as JSON
+    dimension_values = Column(JSON)
+
     def __init__(self, *args, **kwargs):
         # TODO: path could be very long, but how do we guarantee uniqueness of table name
         #   across datasets? or should we just go with table name and use full path only
@@ -93,8 +98,12 @@ class MetaTableModel(Base):  # type: ignore
         super().__init__(*args, **kwargs)
 
     @classmethod
-    def from_CatalogSeries(cls, catalog_row: CatalogSeries) -> "MetaTableModel":
+    def from_CatalogSeries(
+        cls, catalog_row: CatalogSeries, dimension_values: dict[str, Any]
+    ) -> "MetaTableModel":
         d = catalog_row.to_dict()
+
+        d["dimension_values"] = dimension_values
 
         # checksum from catalog is actually checksum of a dataset, not table!
         del d["checksum"]
@@ -144,9 +153,6 @@ class MetaVariableModel(Base):  # type: ignore
     table_db_name = Column(String)
     dataset_short_name = Column(String)
     variable_type = Column(String)
-
-    # distinct values of years and entities encoded as JSON
-    dimension_values = Column(JSON)
 
     def __init__(self, *args, **kwargs):
         kwargs["path"] = f"{kwargs['table_path']}/{kwargs['short_name']}"

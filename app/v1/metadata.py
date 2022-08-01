@@ -131,9 +131,11 @@ def metadata_for_backported_variable(variable_id: int):
     # in our DB
     q = """
     select
-        variable_type,
-        dimension_values
-    from meta_variables where variable_id = (?)
+        v.variable_type,
+        t.dimension_values
+    from meta_variables as v
+    join meta_tables as t on t.path = v.table_path
+    where variable_id = (?)
     """
     variable_type, dimension_values = con.execute(q, parameters=[variable_id]).fetchone()  # type: ignore
 
@@ -160,17 +162,12 @@ def _parse_dimension_values(dimension_values: Any) -> Dict[str, Dimension]:
             values=[DimensionProperties(id=y) for y in dimension_values.pop("year")],
         )
 
-    # special case of entities backported variables with entities and their codes
-    if {"entity_id", "entity_name", "entity_code"} <= set(dimension_values.keys()):
+    if "entity_zip" in dimension_values:
         dimensions["entities"] = Dimension(
             type="int",
             values=[
                 DimensionProperties(id=int(e[0]), name=e[1], code=e[2])
-                for e in zip(
-                    dimension_values.pop("entity_id"),
-                    dimension_values.pop("entity_name"),
-                    dimension_values.pop("entity_code"),
-                )
+                for e in map(lambda x: x.split("|"), dimension_values.pop("entity_zip"))
             ],
         )
 
