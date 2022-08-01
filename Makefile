@@ -53,7 +53,7 @@ coverage: .venv
 
 crawl: .venv
 	@echo '==> Crawl ETL catalog'
-	python crawler/crawl.py
+	.venv/bin/python crawler/crawl.py
 
 api: .venv
 	@echo '==> Running API'
@@ -62,7 +62,7 @@ api: .venv
 testdb: .venv
 	@echo '==> Rebuild test DB'
 	rm -f tests/sample_duck.db
-	python crawler/crawl.py --include 'dataset_941|ggdc_maddison' --duckdb-path tests/sample_duck.db
+	.venv/bin/python crawler/crawl.py --include 'dataset_941|ggdc_maddison' --duckdb-path tests/sample_duck.db
 
 clobber: clean
 	find . -name .venv | xargs rm -rf

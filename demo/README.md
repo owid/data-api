@@ -3,7 +3,7 @@
 Start API with `make api` and then run demo with
 
 ```
-python demo/demo.py
+python -m demo/demo.py
 ```
 
 ## Installation
