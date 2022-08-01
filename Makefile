@@ -73,4 +73,4 @@ run: .venv
 	-kill $(lsof -t -i:8000)
 	-kill $(lsof -t -i:8001)
 	nohup make api > api.log 2> api.err < /dev/null &
-	nohup python -m demo.demo > demo.log 2> demo.err < /dev/null &
+	nohup .venv/bin/python -m demo.demo > demo.log 2> demo.err < /dev/null &
