@@ -46,13 +46,13 @@ We only crawl `garden` and `backport` channels right now.
 Run `make crawl` to crawl the entire database (this would take veeeery long) or crawl only sample datasets with
 
 ```
-crawl --include 'dataset_941|ggdc_maddison'
+poetry run crawl --include 'dataset_941|ggdc_maddison'
 ```
 
 or just a garden channel
 
 ```
-crawl --include 'garden'
+poetry run crawl --include 'garden'
 ```
 
 ### Running the API
