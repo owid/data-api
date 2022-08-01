@@ -40,9 +40,6 @@ watch: .venv
 	cp -n .env.example .env || true
 	@echo '==> Installing packages'
 	poetry install
-	# poetry freezes when downloading orjson for some reason, so we need to install it manually
-	# try to fix this in the future
-	poetry run pip install orjson
 	touch $@
 
 check-typing: .venv
