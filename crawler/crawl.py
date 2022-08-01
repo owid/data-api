@@ -405,5 +405,9 @@ def new_session(engine) -> Generator[Session, None, None]:
         session.commit()
 
 
+def main_cli():
+    return typer.run(main)
+
+
 if __name__ == "__main__":
-    typer.run(main)
+    main_cli()

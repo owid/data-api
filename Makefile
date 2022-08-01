@@ -53,7 +53,7 @@ coverage: .venv
 
 crawl: .venv
 	@echo '==> Crawl ETL catalog'
-	.venv/bin/python crawler/crawl.py
+	crawl
 
 api: .venv
 	@echo '==> Running API'

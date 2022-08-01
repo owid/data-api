@@ -4,6 +4,9 @@ version = "0.1.0"
 description = ""
 authors = ["Our World In Data <tech@worldindata.org>"]
 
+[tool.poetry.scripts]
+crawl = "crawler.crawl:main_cli"
+
 [tool.poetry.dependencies]
 python = "^3.9"
 owid-catalog = {path = "vendor/owid-catalog-py", develop = true}
