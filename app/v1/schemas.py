@@ -61,7 +61,7 @@ class VariableMetadataResponse(BaseModel):
     unit: str
     shortUnit: Optional[str]
     code: Optional[str]
-    description: str
+    description: Optional[str]
     createdAt: dt.datetime
     updatedAt: dt.datetime
     coverage: str
