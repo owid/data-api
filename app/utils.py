@@ -25,7 +25,12 @@ class ORJSONResponse(JSONResponse):
 def get_readonly_connection(thread_id: int) -> duckdb.DuckDBPyConnection:
     # duckdb connection is not threadsafe, we have to create one connection per thread
     log.info("duckdb.new_connection", thread_id=thread_id)
-    return duckdb.connect(database=settings.DUCKDB_PATH.as_posix(), read_only=True)
+    con = duckdb.connect(
+        database=settings.DUCKDB_PATH.as_posix(),
+        read_only=True,
+        config={"memory_limit": settings.DUCKDB_MEMORY_LIMIT},
+    )
+    return con
 
 
 def omit_nullable_values(d: dict) -> dict:
