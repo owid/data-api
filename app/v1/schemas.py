@@ -14,13 +14,25 @@ class VariableDataResponse(BaseModel):
     class Config:
         extra = Extra.forbid
 
+class VariableDisplayDataTableConfig(BaseModel):
+    hideAbsoluteChange: Optional[bool]
+    hideRelativeChange: Optional[bool]
+
 
 class VariableDisplay(BaseModel):
     name: Optional[str]
     unit: Optional[str]
     shortUnit: Optional[str]
+    isProjection: Optional[bool]
     includeInTable: Optional[bool]
     conversionFactor: Optional[float]
+    numDecimalPlaces: Optional[int]
+    tolerance: Optional[float]
+    yearIsDay: Optional[bool]
+    zeroDay: Optional[str]
+    entityAnnotationsMap: Optional[str]
+    tableDisplay: Optional[VariableDisplayDataTableConfig]
+    color: Optional[str]
 
     class Config:
         extra = Extra.forbid
