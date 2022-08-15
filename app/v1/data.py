@@ -5,7 +5,7 @@ from typing import Any, Literal, Optional, cast
 import pandas as pd
 import pyarrow as pa
 import structlog
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response, Header
 from fastapi.responses import StreamingResponse
 from pyarrow.feather import write_feather
 
@@ -106,7 +106,7 @@ def sql_query(sql: str, type: DATA_TYPES = "csv"):
     response_model=VariableDataResponse,
     response_model_exclude_unset=True,
 )
-def data_for_backported_variable(variable_id: int, limit: Optional[int] = None):
+def data_for_backported_variable(response: Response, variable_id: int, limit: Optional[int] = None, if_none_match: Optional[str] = Header(default=None)):
     """Fetch data for a single variable."""
 
     con = utils.get_readonly_connection(threading.get_ident())
@@ -114,15 +114,32 @@ def data_for_backported_variable(variable_id: int, limit: Optional[int] = None):
     # get meta about variable
     q = """
     select
-        variable_id,
-        short_name,
-        table_db_name
-    from meta_variables
+        v.variable_id as variable_id,
+        v.short_name as short_name,
+        v.table_db_name as table_db_name,
+        d.checksum as checksum
+    from meta_variables v
+    join meta_tables t on v.table_db_name = t.table_db_name
+    join meta_datasets d on d.path = t.dataset_path
     where variable_id = (?)
     """
     df = cast(pd.DataFrame, con.execute(q, parameters=[variable_id]).fetch_df())
     _assert_single_variable(df.shape[0], variable_id)
     r = dict(df.iloc[0])
+
+    # this is the dataset level checksum which is the best we have
+    # at the moment
+    checksum = r["checksum"]
+
+    # if the client sent a IF-NONE-MATCH header, check if it matches the checksum
+    if if_none_match == checksum:
+        response.status_code = 304
+        return
+
+    # Send the checksum as the etag header and set cache-control to cache with
+    # max-age of 0 (which makes the client validate with the if-none-match header)
+    response.headers["ETag"] = checksum
+    response.headers["Cache-Control"] = "max-age=0" # We could consider allowing a certain time window
 
     # TODO: DuckDB / SQLite doesn't allow parameterized table or column names, how do we escape it properly?
     # is it even needed if we get them from our DB and it is read-only?
@@ -141,6 +158,7 @@ def data_for_backported_variable(variable_id: int, limit: Optional[int] = None):
         q += "limit (?)"
         parameters.append(limit)
     df = cast(pd.DataFrame, con.execute(q, parameters=parameters).fetch_df())
+
     return df.to_dict(orient="list")
 
 
