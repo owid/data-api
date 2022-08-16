@@ -55,6 +55,10 @@ crawl: .venv
 	@echo '==> Crawl ETL catalog'
 	poetry run crawl
 
+crawl-backported: .venv
+	@echo '==> Crawl backported ETL catalog'
+	poetry run crawl --include dataset_
+
 api: .venv
 	@echo '==> Running API'
 	.venv/bin/hypercorn app.main:app --reload
@@ -72,5 +76,7 @@ run: .venv
 	@echo 'Running API and Catalog in the background:'
 	-kill $(lsof -t -i:8000)
 	-kill $(lsof -t -i:8001)
+	# nohup (make api > api.log 2> >(/usr/local/bin/slacktee -a danger -c analytics-errors -u crontab -e service data-api))
+	# nohup .venv/bin/python -m demo.demo > demo.log 2>&1 | /usr/local/bin/slacktee -a danger -c analytics-errors -u crontab -e service browsable-catalog
 	nohup make api > api.log 2> api.err < /dev/null &
 	nohup .venv/bin/python -m demo.demo > demo.log 2> demo.err < /dev/null &

@@ -95,6 +95,12 @@ class MetaTableModel(Base):  # type: ignore
         #   across datasets? or should we just go with table name and use full path only
         #   for non-unique table names?
         kwargs["table_db_name"] = sanitize_table_path(kwargs["path"])
+
+        # TODO: "format" was changed to "formats", we'd have to rebuild the entire database, so just
+        # hotfix it for now
+        assert "feather" in kwargs["formats"]
+        kwargs["format"] = "feather"
+        del kwargs["formats"]
         super().__init__(*args, **kwargs)
 
     @classmethod
