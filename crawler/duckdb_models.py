@@ -10,8 +10,6 @@ from sqlalchemy import JSON, Boolean, Column, Integer, String, create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
 
-from crawler.utils import sanitize_table_path
-
 Base = declarative_base()
 
 
@@ -77,7 +75,6 @@ class MetaTableModel(Base):  # type: ignore
 
     table_name = Column(String)
     dataset_name = Column(String)
-    table_db_name = Column(String)
 
     # columns from catalog
     version = Column(String)
@@ -91,11 +88,6 @@ class MetaTableModel(Base):  # type: ignore
     dimension_values = Column(JSON)
 
     def __init__(self, *args, **kwargs):
-        # TODO: path could be very long, but how do we guarantee uniqueness of table name
-        #   across datasets? or should we just go with table name and use full path only
-        #   for non-unique table names?
-        kwargs["table_db_name"] = sanitize_table_path(kwargs["path"])
-
         # TODO: "format" was changed to "formats", we'd have to rebuild the entire database, so just
         # hotfix it for now
         assert "feather" in kwargs["formats"]
@@ -156,7 +148,6 @@ class MetaVariableModel(Base):  # type: ignore
     short_name = Column(String)
     table_path = Column(String)
     dataset_path = Column(String)
-    table_db_name = Column(String)
     dataset_short_name = Column(String)
     variable_type = Column(String)
 
