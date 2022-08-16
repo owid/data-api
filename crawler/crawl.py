@@ -186,6 +186,12 @@ def _extract_dimension_values(
     if not dims_to_process:
         return {}
 
+    q = f"""
+    select distinct {",".join(list(dims_to_process))}
+    from read_parquet('{parquet_path}')
+    """
+    df = pd.read_sql(q, engine)
+
     # entities belong together and has to be stored as tuple `entity_id|entity_name|entity_code`
     # NOTE: this might be generalized to any column name with `_id`, `_name`, `_code` suffix
     if {"entity_id", "entity_name", "entity_code"} <= dims_to_process:
@@ -213,13 +219,7 @@ def _extract_dimension_values(
         }
 
     for dim in dims_to_process:
-        q = f"""
-        select distinct {dim}
-        from read_parquet('{parquet_path}')
-        """
-        df = pd.read_sql(q, engine)
-
-        dimension_values[dim] = sorted(set(df[dim].dropna()))
+        dimension_values[dim] = sorted(set(df[dim]))
 
     return dimension_values
 
@@ -292,11 +292,6 @@ def main(
             parquet_path = (owid_catalog_dir / catalog_row.path).with_suffix(".parquet")
 
             table_meta, fields_meta = _read_parquet_metadata(parquet_path)
-
-            log.info(
-                "table.extract_dimension_values",
-                path=catalog_row.path,
-            )
 
             # NOTE: this requires reading parquet file, which could be slow. We could instead write
             # dimensions values to metadata when generating the parquet file.
