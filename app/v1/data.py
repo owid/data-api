@@ -5,7 +5,7 @@ from typing import Any, Literal, Optional, cast
 import pandas as pd
 import pyarrow as pa
 import structlog
-from fastapi import APIRouter, HTTPException, Response, Header
+from fastapi import APIRouter, Header, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pyarrow.feather import write_feather
 
@@ -106,7 +106,12 @@ def sql_query(sql: str, type: DATA_TYPES = "csv"):
     response_model=VariableDataResponse,
     response_model_exclude_unset=True,
 )
-def data_for_backported_variable(response: Response, variable_id: int, limit: Optional[int] = None, if_none_match: Optional[str] = Header(default=None)):
+def data_for_backported_variable(
+    response: Response,
+    variable_id: int,
+    limit: Optional[int] = None,
+    if_none_match: Optional[str] = Header(default=None),
+):
     """Fetch data for a single variable."""
 
     con = utils.get_readonly_connection(threading.get_ident())
@@ -139,7 +144,9 @@ def data_for_backported_variable(response: Response, variable_id: int, limit: Op
     # Send the checksum as the etag header and set cache-control to cache with
     # max-age of 0 (which makes the client validate with the if-none-match header)
     response.headers["ETag"] = checksum
-    response.headers["Cache-Control"] = "max-age=0" # We could consider allowing a certain time window
+    response.headers[
+        "Cache-Control"
+    ] = "max-age=0"  # We could consider allowing a certain time window
 
     # TODO: DuckDB / SQLite doesn't allow parameterized table or column names, how do we escape it properly?
     # is it even needed if we get them from our DB and it is read-only?

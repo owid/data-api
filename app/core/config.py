@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Union
+from typing import List, Optional, Union
 
 from pydantic import AnyHttpUrl, BaseSettings, validator
 
@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     DUCKDB_PATH: Path = Path("duck.db")
 
     DUCKDB_MEMORY_LIMIT = "2GB"
+
+    BUGSNAG_API_KEY: Optional[str] = None
 
     @validator("BACKEND_CORS_ORIGINS", pre=True)
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:

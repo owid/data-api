@@ -158,6 +158,12 @@ def _parse_meta_variable(
     if (var_meta.unit == "") or pd.isnull(var_meta):
         var_meta.unit = (var_meta.display or {}).get("unit")
 
+    # if there is backported variable in non-backported dataset, remove its grapher
+    # metadata to make sure we don't have duplicate variable ids in DB
+    channel = dataset_path.split("/")[0]
+    if channel != "backport" and var_meta.additional_info:
+        var_meta.additional_info.pop("grapher_meta", None)
+
     return MetaVariableModel(
         title=var_meta.title,
         description=var_meta.description,
