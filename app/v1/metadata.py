@@ -1,11 +1,11 @@
 import json
 import threading
-from typing import Any, Dict, cast
+from typing import Any, Dict, Optional, cast
 
 import numpy as np
 import pandas as pd
 import structlog
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response, Header
 
 from app import utils
 
@@ -61,7 +61,7 @@ def metadata_for_etl_variable(
     response_model=VariableMetadataResponse,
     response_model_exclude_unset=True,
 )
-def metadata_for_backported_variable(variable_id: int):
+def metadata_for_backported_variable(response: Response, variable_id: int, if_none_match: Optional[str] = Header(default=None)):
     """Fetch metadata for a single variable from database.
     This function is identical to Variables.getVariableData in owid-grapher repository
     """
@@ -94,8 +94,10 @@ def metadata_for_backported_variable(variable_id: int):
         v.sources->>'$[0].url' as sourceLink,
         v.sources->>'$[0].publisher_source' as sourceDataPublisherSource,
         v.sources->>'$[0].published_by' as sourceDataPublishedBy,
+        d.checksum as checksum,
     FROM meta_variables as v
     JOIN meta_datasets as d ON d.short_name = v.dataset_short_name
+    join meta_tables t on v.table_db_name = t.table_db_name
     WHERE v.variable_id = (?)
     """
     con = utils.get_readonly_connection(threading.get_ident())
@@ -124,7 +126,22 @@ def metadata_for_backported_variable(variable_id: int):
 
     nonRedistributable = row.pop("nonRedistributable")
     displayJson = row.pop("display")
+
+    # this is the dataset level checksum which is the best we have
+    # at the moment
+    checksum = row.pop("checksum")
+
     variable = utils.omit_nullable_values(row)
+
+    # if the client sent a IF-NONE-MATCH header, check if it matches the checksum
+    if if_none_match == checksum:
+        response.status_code = 304
+        return
+
+    # Send the checksum as the etag header and set cache-control to cache with
+    # max-age of 0 (which makes the client validate with the if-none-match header)
+    response.headers["ETag"] = checksum
+    response.headers["Cache-Control"] = "max-age=0" # We could consider allowing a certain time window
 
     # get variable types from duckdb (all metadata would be eventually retrieved in duckdb)
     # NOTE: getting these is a bit of a pain, we have a lot of duplicate information
