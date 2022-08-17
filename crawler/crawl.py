@@ -186,6 +186,8 @@ def _extract_dimension_values(
     if not dims_to_process:
         return {}
 
+    # NOTE: this could be made more efficient by reading all dimensions separately
+    # and fetching only distinct values (or adding dimension values to parquet metadata)
     q = f"""
     select distinct {",".join(list(dims_to_process))}
     from read_parquet('{parquet_path}')
@@ -219,7 +221,7 @@ def _extract_dimension_values(
         }
 
     for dim in dims_to_process:
-        dimension_values[dim] = sorted(set(df[dim]))
+        dimension_values[dim] = sorted(set(df[dim].dropna()))
 
     return dimension_values
 
