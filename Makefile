@@ -17,7 +17,7 @@ help:
 	@echo '  make testdb    Rebuild test DB'
 	@echo '  make watch     Run all tests, watching for changes'
 	@echo '  make clobber   Delete non-reference data and .venv'
-	@echo '  make run       Run API and Catalog in the background
+	@echo '  make run       Run API and Catalog in the background'
 	@echo
 
 
