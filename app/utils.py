@@ -1,10 +1,11 @@
 import functools
-from typing import Any
+from typing import Any, Optional
 
 import duckdb
 import orjson
 import pandas as pd
 import structlog
+from fastapi import HTTPException, Response
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
@@ -35,3 +36,19 @@ def get_readonly_connection(thread_id: int) -> duckdb.DuckDBPyConnection:
 
 def omit_nullable_values(d: dict) -> dict:
     return {k: v for k, v in d.items() if v is not None and not pd.isna(v)}
+
+
+def set_cache_control(
+    response: Response, if_none_match: Optional[str], checksum: str
+) -> Response:
+    # if the client sent a IF-NONE-MATCH header, check if it matches the checksum
+    if if_none_match == checksum:
+        raise HTTPException(status_code=304, detail="Checksum match")
+
+    # Send the checksum as the etag header and set cache-control to cache with
+    # max-age of 0 (which makes the client validate with the if-none-match header)
+    response.headers["ETag"] = checksum
+    response.headers[
+        "Cache-Control"
+    ] = "max-age=0"  # We could consider allowing a certain time window
+    return response

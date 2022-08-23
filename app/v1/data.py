@@ -136,17 +136,7 @@ def data_for_backported_variable(
     # at the moment
     checksum = r["checksum"]
 
-    # if the client sent a IF-NONE-MATCH header, check if it matches the checksum
-    if if_none_match == checksum:
-        response.status_code = 304
-        return
-
-    # Send the checksum as the etag header and set cache-control to cache with
-    # max-age of 0 (which makes the client validate with the if-none-match header)
-    response.headers["ETag"] = checksum
-    response.headers[
-        "Cache-Control"
-    ] = "max-age=0"  # We could consider allowing a certain time window
+    response = utils.set_cache_control(response, if_none_match, checksum)
 
     parquet_path = (settings.OWID_CATALOG_DIR / r["table_path"]).with_suffix(".parquet")
 
