@@ -1,4 +1,5 @@
 import functools
+import io
 from typing import Any, Optional
 
 import duckdb
@@ -6,7 +7,7 @@ import orjson
 import pandas as pd
 import structlog
 from fastapi import HTTPException, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.core.config import settings
 
@@ -51,4 +52,15 @@ def set_cache_control(
     response.headers[
         "Cache-Control"
     ] = "max-age=0"  # We could consider allowing a certain time window
+    return response
+
+
+def bytes_to_response(bytes_io: io.BytesIO) -> StreamingResponse:
+    # NOTE: using raw `bytes_io` should be in theory faster than `iter([bytes_io.getvalue()])`, yet
+    # it is much slower for unknown reasons
+    # response = StreamingResponse(bytes_io, media_type="application/octet-stream")
+    response = StreamingResponse(
+        iter([bytes_io.getvalue()]), media_type="application/octet-stream"
+    )
+    response.headers["Content-Disposition"] = "attachment; filename=owid.feather"
     return response

@@ -1,6 +1,7 @@
 import io
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from fastapi.testclient import TestClient
 
@@ -9,7 +10,7 @@ from app.main import app, settings
 client = TestClient(app)
 
 
-def test_variableById_data_for_variable():
+def test_variableById_data_for_variable_data_values():
     response = client.get("/v2/variableById/data/42539")
     assert response.status_code == 200
     assert set(response.json().keys()) == {
@@ -21,10 +22,24 @@ def test_variableById_data_for_variable():
     }
 
 
-def test_variableById_metadata_for_variable():
+def test_variableById_data_for_variable_catalog():
+    response = client.get("/v2/variableById/data/328589")
+    assert response.status_code == 200
+    assert set(response.json().keys()) == {
+        "years",
+        "entities",
+        # "entity_names",
+        # "entity_codes",
+        "values",
+    }
+
+
+def test_variableById_metadata_for_variable_data_values():
     response = client.get("/v2/variableById/metadata/42539")
     assert response.status_code == 200
-    assert response.json() == {
+    js = response.json()
+    js["source"]["additionalInfo"] = js["source"]["additionalInfo"][:100] + "..."
+    assert js == {
         "name": "ATM (Comin and Hobijn (2004))",
         "unit": "",
         "description": "Number of electro-mechanical devices that permit authorized users, typically using machine readable plastic cards, to withdraw cash from their accounts and/or access other services",
@@ -35,7 +50,6 @@ def test_variableById_metadata_for_variable():
         "datasetId": 941,
         "columnOrder": 0,
         "datasetName": "Technology Adoption - Isard (1942) and others",
-        "type": "float",
         "nonRedistributable": False,
         "display": {},
         "source": {
@@ -45,8 +59,9 @@ def test_variableById_metadata_for_variable():
             "dataPublisherSource": "Scholarly work",
             "link": "http://www.jstor.org/stable/1927670",
             "retrievedDate": "28/09/2017",
-            "additionalInfo": "Roads - Historical Statistics of the United States, Colonial Times to 1970, Volume 1 and 2. Bureau of the Census, Washington D.C. see Chapter Q - Transportation, Q50-63. Link: https://www2.census.gov/library/publications/1975/compendia/hist_stats_colonial-1970/hist_stats_colonial-1970p2-chQ.pdf;\nDiesel locomotives - Historical Statistics of the United States, Colonial Times to 1970, Volume 1 and 2. Bureau of the Census, Washington D.C. see Chapter Q - Transportation, Series Q284-312: Railroad mileage, equipment, and passenger traffic and revenue: 1890 to 1970. Link: https://www2.census.gov/library/publications/1975/compendia/hist_stats_colonial-1970/hist_stats_colonial-1970p2-chQ.pdf;\nAgricultural tractor, ATM, Aviation passenger-km, Credit and debit payments, Card payments, MRI units, Newspapers, Retail locations accepting card, Rail passenger-km, Steamships (tons), Crude steel production (blast oxygen furnaces)/(electric furnaces), Synthetic (non-cellulosic) fibres, Commercial vehicles - Comin and Hobijn (2004). Link: http://www.nber.org/data/chat/;\nMail and telegrams - Mitchell (1998) International Historical Statistics: the Americas, 1970-2000, 5th Ed",
+            "additionalInfo": "Roads - Historical Statistics of the United States, Colonial Times to 1970, Volume 1 and 2. Bureau o...",
         },
+        "type": "float",
         "dimensions": {
             "years": {
                 "type": "int",
@@ -74,4 +89,148 @@ def test_variableById_metadata_for_variable():
                 "values": [{"id": 13, "name": "United States", "code": "USA"}],
             },
         },
+    }
+
+
+def test_variableById_metadata_for_variable_catalog():
+    response = client.get("/v2/variableById/metadata/328589")
+    assert response.status_code == 200
+    js = response.json()
+    js["source"]["additionalInfo"] = js["source"]["additionalInfo"][:100] + "..."
+    js["dimensions"]["years"]["values"] = js["dimensions"]["years"]["values"][:5]
+    js["dimensions"]["entities"]["values"] = js["dimensions"]["entities"]["values"][:5]
+    assert js == {
+        "name": "GDP",
+        "unit": "2011 int-$",
+        "shortUnit": "$",
+        "description": "Gross domestic product measured in international-$ using 2011 prices to adjust for price changes over time (inflation) and price differences between countries. Calculated by multiplying GDP per capita with population.",
+        "createdAt": "2022-08-19T14:17:48",
+        "updatedAt": "2022-08-23T11:38:08",
+        "coverage": "",
+        "timespan": "1-2018",
+        "datasetId": 5839,
+        "columnOrder": 0,
+        "datasetName": "Maddison Project Database (GGDC, 2020)",
+        "nonRedistributable": False,
+        "display": {
+            "unit": "2011 int-$",
+            "shortUnit": "$",
+            "numDecimalPlaces": 0,
+            "entityAnnotationsMap": "Western Offshoots: United States, Canada, Australia and New Zealand",
+        },
+        "originalMetadata": "{}",
+        "source": {
+            "id": 21466,
+            "name": "Maddison Project Database 2020 (Bolt and van Zanden, 2020)",
+            "dataPublishedBy": "Bolt, Jutta and Jan Luiten van Zanden (2020), “Maddison style estimates of the evolution of the world economy. A new 2020 update“.",
+            "dataPublisherSource": "The Maddison Project Database is based on the work of many researchers that have produced estimates of\neconomic growth for individual countries. The full list of sources for this historical data is given for each country below.\n",
+            "link": "https://www.rug.nl/ggdc/historicaldevelopment/maddison/releases/maddison-project-database-2020",
+            "retrievedDate": "2022-04-12",
+            "additionalInfo": "Notes:\n- Tanzania refers only to Mainland Tanzania.\n- Time series for former countries and territori...",
+        },
+        "type": "float",
+        "dimensions": {
+            "years": {
+                "type": "int",
+                "values": [
+                    {"id": 1950},
+                    {"id": 1951},
+                    {"id": 1952},
+                    {"id": 1953},
+                    {"id": 1954},
+                ],
+            },
+            "entities": {
+                "type": "int",
+                "values": [
+                    {"id": 15, "name": "Afghanistan", "code": "AFG"},
+                    {"id": 16, "name": "Albania", "code": "ALB"},
+                    {"id": 17, "name": "Algeria", "code": "DZA"},
+                    {"id": 19, "name": "Angola", "code": "AGO"},
+                    {"id": 21, "name": "Argentina", "code": "ARG"},
+                ],
+            },
+        },
+    }
+
+
+def test_datasetById_data_for_dataset_data_values():
+    response = client.get(
+        "/v2/datasetById/data/941.feather",
+        params={"columns": ["ATM (Comin and Hobijn (2004))"], "limit": 2},
+    )
+    assert response.status_code == 200
+    df = pd.read_feather(io.BytesIO(response.content))
+    assert df.to_dict(orient="list") == {
+        "ATM (Comin and Hobijn (2004))": [80853.95313, 75526.61719]
+    }
+
+
+def test_datasetById_data_for_dataset_catalog():
+    response = client.get(
+        "/v2/datasetById/data/5839.feather",
+        params={"columns": ["GDP", "Population"], "limit": 2},
+    )
+    assert response.status_code == 200
+    df = pd.read_feather(io.BytesIO(response.content))
+    df = df.fillna("nan")
+    assert df.to_dict(orient="list") == {
+        "entityId": [15, 15],
+        "year": [1820, 1870],
+        "GDP": ["nan", "nan"],
+        "Population": [3280000.0, 4207000.0],
+    }
+
+
+def test_datasetById_metadata():
+    response = client.get(
+        "/v2/datasetById/metadata/5839",
+    )
+    assert response.status_code == 200
+    js = response.json()
+    js["sourceDescription"]["additionalInfo"] = js["sourceDescription"][
+        "additionalInfo"
+    ][:10]
+    assert js == {
+        "createdAt": "2022-08-17T14:40:10",
+        "createdByUserId": 59,
+        "dataEditedAt": "2022-08-23T11:38:08",
+        "dataEditedByUserId": 59,
+        "description": "",
+        "id": 5839,
+        "isArchived": 0,
+        "isPrivate": 0,
+        "metadataEditedAt": "2022-08-23T11:38:08",
+        "metadataEditedByUserId": 59,
+        "name": "Maddison Project Database (GGDC, 2020)",
+        "namespace": "ggdc",
+        "nonRedistributable": 0,
+        "shortName": "ggdc_maddison__2020_10_01",
+        "sourceChecksum": "6054c1cd507ea6f82c4dd8d416c77aa6",
+        "sourceDescription": {
+            "additionalInfo": "Notes:\n- T",
+            "dataPublishedBy": "Bolt, Jutta and Jan Luiten van "
+            "Zanden (2020), “Maddison style "
+            "estimates of the evolution of the "
+            "world economy. A new 2020 update“.",
+            "dataPublisherSource": "The Maddison Project Database "
+            "is based on the work of many "
+            "researchers that have produced "
+            "estimates of\n"
+            "economic growth for individual "
+            "countries. The full list of "
+            "sources for this historical "
+            "data is given for each country "
+            "below.\n",
+            "link": "https://www.rug.nl/ggdc/historicaldevelopment/maddison/releases/maddison-project-database-2020",
+            "retrievedDate": "2022-04-12",
+        },
+        "sourceName": "Maddison Project Database 2020 (Bolt and van Zanden, 2020)",
+        "updatedAt": "2022-08-23T11:38:08",
+        "variables": [
+            {"id": 328589, "name": "GDP", "shortName": "gdp"},
+            {"id": 328590, "name": "GDP per capita", "shortName": "gdp_per_capita"},
+            {"id": 328591, "name": "Population", "shortName": "population"},
+        ],
+        "version": "2020-10-01",
     }

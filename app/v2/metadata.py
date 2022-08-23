@@ -19,6 +19,7 @@ from app.v1.schemas import (
     VariableSource,
 )
 
+from .data import _fetch_variable_from_catalog, _fetch_variable_from_data_values
 from .db import engine
 
 log = structlog.get_logger()
@@ -81,24 +82,6 @@ def metadata_for_variable_id(
     # row = VariableRow(**df.iloc[0].to_dict())
     row = df.iloc[0].to_dict()
 
-    # TODO: this is inefficient as we need to get all data_values just to get
-    # variable type (and dimensions, but these can be at least fetched separately
-    # with `distinct`). Ideally we'd have variable type already in `variables` table
-    sql = """
-    SELECT
-        value,
-        year,
-        entities.id AS entityId,
-        entities.name AS entityName,
-        entities.code AS entityCode
-    FROM data_values
-    LEFT JOIN entities ON data_values.entityId = entities.id
-    WHERE data_values.variableId = %(variable_id)s
-    ORDER BY
-        year ASC
-    """
-    results = pd.read_sql(sql, engine, params={"variable_id": variable_id})
-
     variable = row
     sourceId = row.pop("sourceId")
     sourceName = row.pop("sourceName")
@@ -123,6 +106,14 @@ def metadata_for_variable_id(
             additionalInfo=partialSource.get("additionalInfo") or "",
         ),
     )
+
+    if variable["catalogPath"]:
+        results = _fetch_variable_from_catalog(row["catalogPath"], row["shortName"])
+    else:
+        # TODO: this is inefficient as we need to get all data_values just to get
+        # variable type (and dimensions, but these can be at least fetched separately
+        # with `distinct`). Ideally we'd have variable type already in `variables` table
+        results = _fetch_variable_from_data_values(variable_id)
 
     entityArray = (
         results[["entityId", "entityName", "entityCode"]]
@@ -162,9 +153,11 @@ def metadata_for_variable_id(
     # elif encounteredStringDataValues:
     #     variableMetadata["type"] = "string"
 
-    # remove `id` to be compatible with v1 schema, but perhaps we should
+    # remove fields to be compatible with v1 schema, but perhaps we should
     # include it?
     variableMetadata.pop("id")
+    variableMetadata.pop("shortName", None)
+    variableMetadata.pop("catalogPath", None)
 
     return VariableMetadataResponse(
         **variableMetadata,
@@ -182,3 +175,39 @@ def metadata_for_variable_id(
     #         entities={"values": entityArray},
     #     ),
     # )
+
+
+@router.get("/datasetById/metadata/{dataset_id}")
+def metadata_for_dataset_id(dataset_id: int):
+    sql = """
+    select
+        datasets.*,
+        sources.name AS sourceName,
+        sources.description AS sourceDescription
+    from datasets
+    JOIN sources ON datasets.id = sources.datasetId
+    where datasets.id = %(dataset_id)s
+    """
+    dataset_df = pd.read_sql(sql, engine, params={"dataset_id": dataset_id})
+    if dataset_df.empty:
+        raise HTTPException(
+            status_code=404, detail=f"datasetId `{dataset_id}` not found"
+        )
+    assert dataset_df.shape[0] == 1, "Expected exactly one source per dataset"
+
+    ds = dataset_df.iloc[0].to_dict()
+    ds['sourceDescription'] = json.loads(ds['sourceDescription'])
+
+    # add all dataset variables
+    sql = """
+    select
+        id,
+        shortName,
+        name
+    from variables where datasetId = %(dataset_id)s
+    """
+    variables_df = pd.read_sql(sql, engine, params={"dataset_id": dataset_id})
+
+    ds["variables"] = variables_df.to_dict(orient="records")
+
+    return ds

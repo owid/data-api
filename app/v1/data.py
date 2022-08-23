@@ -38,17 +38,6 @@ def _read_sql_bytes(con, sql: str, parameters) -> io.BytesIO:
     return sink
 
 
-def _bytes_to_response(bytes_io: io.BytesIO) -> StreamingResponse:
-    # NOTE: using raw `bytes_io` should be in theory faster than `iter([bytes_io.getvalue()])`, yet
-    # it is much slower for unknown reasons
-    # response = StreamingResponse(bytes_io, media_type="application/octet-stream")
-    response = StreamingResponse(
-        iter([bytes_io.getvalue()]), media_type="application/octet-stream"
-    )
-    response.headers["Content-Disposition"] = "attachment; filename=owid.feather"
-    return response
-
-
 def _sql_to_response(
     con, sql: str, type: DATA_TYPES, parameters: list[Any] = []
 ) -> Any:
@@ -59,14 +48,14 @@ def _sql_to_response(
         # when you try to read it with pandas (see https://github.com/duckdb/duckdb/issues/4130)
         # we'd have to either convert categoricals into strings or change format while still in arrow format
         bytes_io = _read_sql_bytes(con, sql, parameters=parameters)
-        return _bytes_to_response(bytes_io)
+        return utils.bytes_to_response(bytes_io)
 
     # read data into dataframe and then convert to feather
     elif type == "feather":
         bytes_io = io.BytesIO()
         df = con.execute(sql, parameters=parameters).fetch_df()
         write_feather(df, bytes_io)
-        return _bytes_to_response(bytes_io)
+        return utils.bytes_to_response(bytes_io)
 
     # read data into dataframe and then convert to csv
     elif type == "csv":
