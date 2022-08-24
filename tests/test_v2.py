@@ -162,7 +162,11 @@ def test_datasetById_data_for_dataset_data_values():
     assert response.status_code == 200
     df = pd.read_feather(io.BytesIO(response.content))
     assert df.to_dict(orient="list") == {
-        "ATM (Comin and Hobijn (2004))": [80853.95313, 75526.61719]
+        "year": [1988, 1989],
+        "entityId": [13, 13],
+        "entityName": ["United States", "United States"],
+        "entityCode": ["USA", "USA"],
+        "ATM (Comin and Hobijn (2004))": [80853.95313, 75526.61719],
     }
 
 
@@ -233,4 +237,31 @@ def test_datasetById_metadata():
             {"id": 328591, "name": "Population", "shortName": "population"},
         ],
         "version": "2020-10-01",
+    }
+
+
+def test_variableById_data_for_variable_catalog_with_dimensions():
+    response = client.get("/v2/variableById/data/331947")
+    assert response.status_code == 200
+    assert set(response.json().keys()) == {
+        "years",
+        "entities",
+        # "entity_names",
+        # "entity_codes",
+        "values",
+    }
+
+
+def test_datasetById_data_for_dataset_catalog_with_dimensions():
+    response = client.get(
+        "/v2/datasetById/data/5775.feather",
+        # params={"columns": ["GDP", "Population"], "limit": 2},
+    )
+    assert response.status_code == 200
+    df = pd.read_feather(io.BytesIO(response.content))
+    df = df.fillna("nan")
+    assert df.head(2).to_dict(orient="list") == {
+        "entityId": [15, 15],
+        "year": [-10000, -9000],
+        "Population density": [0.023000000044703484, 0.03099999949336052],
     }

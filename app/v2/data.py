@@ -1,5 +1,6 @@
 import io
-from typing import Literal, Optional
+import json
+from typing import Any, List, Literal, Optional
 
 import numpy as np
 import pandas as pd
@@ -39,7 +40,7 @@ def data_for_variable_id(
     # fetch variable first to see whether data is in data_values or in catalog
     sql = """
     SELECT
-        id, shortName, catalogPath
+        id, shortName, catalogPath, dimensions
     FROM variables WHERE id = %(variable_id)s
     """
     vf = pd.read_sql(sql, engine, params={"variable_id": variable_id})
@@ -49,10 +50,18 @@ def data_for_variable_id(
         )
     catalog_path = vf.catalogPath.values[0]
     variable_short_name = vf.shortName.values[0]
+    dimensions = json.loads(vf.dimensions.values[0] or "{}")
 
     # TODO: create Reader class and two subclasses for reading from catalog and from data values
     if catalog_path:
-        results = _fetch_variable_from_catalog(catalog_path, variable_short_name)
+        if dimensions:
+            results = _fetch_variable_from_catalog(
+                catalog_path, dimensions["originalShortName"], dimensions["filters"]
+            )
+        else:
+            results = _fetch_variable_from_catalog(
+                catalog_path, variable_short_name, []
+            )
     else:
         results = _fetch_variable_from_data_values(variable_id)
 
@@ -86,14 +95,20 @@ def _add_entity_name_and_code(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _fetch_variable_from_catalog(catalog_path, variable_short_name) -> pd.DataFrame:
+def _fetch_variable_from_catalog(
+    catalog_path, variable_short_name, filters=[]
+) -> pd.DataFrame:
     parquet_path = (settings.OWID_CATALOG_DIR / catalog_path).with_suffix(".parquet")
+
+    parquet_filters: List[Any] = [(variable_short_name, "!=", np.nan)]
+    for filter in filters:
+        parquet_filters.append((filter["name"], "=", filter["value"]))
 
     # materializing in pandas might be unnecessary, we could send byte response directly
     df = pq.read_table(
         parquet_path,
         columns=["entity_id", "year", variable_short_name],
-        filters=[(variable_short_name, "!=", np.nan)],
+        filters=parquet_filters,
     ).to_pandas()
 
     df = df.rename(
@@ -171,10 +186,10 @@ def _fetch_dataset_from_data_values(
     # downcast types
     # NOTE: this would be easier if we had type for every variable in DB
     for col in df.columns:
-        df[col] = pd.to_numeric(df[col])
+        df[col] = pd.to_numeric(df[col], errors="ignore")
 
     # use variable names for columns
-    df.columns = df.columns.map(id_to_name)
+    df = df.rename(columns=id_to_name)
 
     return df
 
@@ -226,7 +241,10 @@ def data_for_dataset_id(
     # get all variables from dataset
     sql = """
     SELECT
-        id, shortName, name, catalogPath
+        id,
+        shortName,
+        name,
+        catalogPath
     FROM variables WHERE datasetId = %(dataset_id)s
     """
     variables_df = pd.read_sql(sql, engine, params={"dataset_id": dataset_id})
@@ -256,6 +274,13 @@ def data_for_dataset_id(
             raise NotImplementedError(
                 "Datasets with multiple tables are not yet supported"
             )
+
+        # -- use names without dimensions suffix
+        # COALESCE(dimensions->>"$.originalShortName", shortName) AS shortName,
+        # COALESCE(dimensions->>"$.originalName", name) AS name,
+
+        # group dimensions together into single variables
+        variables_df = variables_df.drop_duplicates(subset=["shortName"])
 
         df = _fetch_dataset_from_catalog(
             variables_df.catalogPath.iloc[0],
