@@ -161,7 +161,7 @@ def _df_to_format(df: pd.DataFrame, format: FORMATS):
 
 
 def _fetch_dataset_from_data_values(
-    variable_ids: list[int], id_to_name: dict[int, str], limit: int = 1000000000
+    variable_ids: list[int], id_to_name: dict[int, str]
 ) -> pd.DataFrame:
     sql = """
     SELECT
@@ -174,9 +174,8 @@ def _fetch_dataset_from_data_values(
     FROM data_values
     LEFT JOIN entities ON data_values.entityId = entities.id
     WHERE data_values.variableId in %(variable_ids)s
-    LIMIT %(limit)s
     """
-    df = pd.read_sql(sql, engine, params={"variable_ids": variable_ids, "limit": limit})
+    df = pd.read_sql(sql, engine, params={"variable_ids": variable_ids})
     df = df.pivot(
         index=["year", "entityId", "entityName", "entityCode"],
         columns="variableId",
@@ -198,7 +197,6 @@ def _fetch_dataset_from_catalog(
     catalog_path: str,
     variable_short_names: list[str],
     short_name_to_name: dict[int, str],
-    limit: int = 1000000000,
 ) -> pd.DataFrame:
     parquet_path = (settings.OWID_CATALOG_DIR / catalog_path).with_suffix(".parquet")
 
@@ -210,9 +208,6 @@ def _fetch_dataset_from_catalog(
         # TODO: we could ignore rows with all missing values
         # filters=[(variable_short_name, "!=", np.nan)],
     ).to_pandas()
-
-    # TODO: could be more efficient
-    df = df.head(limit)
 
     df = df.rename(
         columns={
@@ -232,7 +227,6 @@ def data_for_dataset_id(
     dataset_id: int,
     format: FORMATS = "csv",
     columns: Optional[list[str]] = Query(default=None),
-    limit: int = 1000000000,
     # if_none_match: Optional[str] = Header(default=None),
 ):
     """We don't want API to load dataset from parquet into memory, process it and return back to user.
@@ -263,7 +257,7 @@ def data_for_dataset_id(
 
     if variables_df.catalogPath.isnull().all():
         df = _fetch_dataset_from_data_values(
-            list(variables_df.id), variables_df.set_index("id").name, limit=limit
+            list(variables_df.id), variables_df.set_index("id").name
         )
         return _df_to_format(df, format)
 
@@ -286,7 +280,6 @@ def data_for_dataset_id(
             variables_df.catalogPath.iloc[0],
             list(variables_df.shortName),
             variables_df.set_index("shortName").name,
-            limit=limit,
         )
         return _df_to_format(df, format)
 
