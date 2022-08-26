@@ -6,7 +6,7 @@ _API for accessing data from our data catalog._
 
 ## Overview
 
-Our World in Data is trying to build a new data layer for our charts and visualisations based a repeatable and transparent data pipeline, our [etl](https://github.org/owid/etl). The ETL generates and publishes the latest version of our data catalog to S3.
+Our World in Data is trying to build a new data layer for our charts and visualisations based a repeatable and transparent data pipeline, our [etl](https://github.com/owid/etl). The ETL generates and publishes the latest version of our data catalog to S3.
 
 This project adds two components, a crawler and a web API. The crawler walks the data catalog and generates a local DuckDB database with the contents. The Dynamic API then provides RESTful access to the data, including SQL support thanks to DuckDB.
 
@@ -95,4 +95,4 @@ make testdb && pytest -s tests/test_v1.py
 
 ## Future considerations
 
-This project was generated via [manage-fastapi](https://ycd.github.io/manage-fastapi/). We might re-generate the project with a [different template](https://fastapi.tiangolo.com/advanced/templates/) based on our production requirements.
+This project was generated via [manage-fastapi](https://github.com/ycd/manage-fastapi/). We might re-generate the project with a [different template](https://fastapi.tiangolo.com/advanced/templates/) based on our production requirements.
