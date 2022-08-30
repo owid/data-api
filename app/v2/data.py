@@ -1,5 +1,6 @@
 import io
 import json
+import time
 from typing import Any, List, Literal, Optional
 
 import numpy as np
@@ -9,6 +10,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from pyarrow.feather import write_feather
+from pyarrow.lib import ArrowInvalid
 
 from app import utils
 from app.core.config import settings
@@ -36,6 +38,7 @@ def data_for_variable_id(
     This function is similar to Variables.getVariableData in owid-grapher repository
     """
     # TODO: cache control with `set_cache_control`
+    t = time.time()
 
     # fetch variable first to see whether data is in data_values or in catalog
     sql = """
@@ -136,7 +139,14 @@ def _fetch_variable_from_data_values(variable_id: int) -> pd.DataFrame:
     ORDER BY
         year ASC
     """
-    return pd.read_sql(sql, engine, params={"variable_id": variable_id})
+    t = time.time()
+    df = pd.read_sql(sql, engine, params={"variable_id": variable_id})
+    log.info(
+        "fetch_variable_from_data_values",
+        variable_id=variable_id,
+        t=round(time.time() - t, 3),
+    )
+    return df
 
 
 def _df_to_format(df: pd.DataFrame, format: FORMATS):
@@ -168,55 +178,67 @@ def _fetch_dataset_from_data_values(
         variableId,
         value,
         year,
-        entities.id AS entityId,
-        entities.name AS entityName,
-        entities.code AS entityCode
+        entityId
     FROM data_values
-    LEFT JOIN entities ON data_values.entityId = entities.id
     WHERE data_values.variableId in %(variable_ids)s
     """
+    t = time.time()
     df = pd.read_sql(sql, engine, params={"variable_ids": variable_ids})
+    log.info("fetch_dataset_from_data_values.read_sql", t=round(time.time() - t, 3))
+
+    t = time.time()
     df = df.pivot(
-        index=["year", "entityId", "entityName", "entityCode"],
+        index=["year", "entityId"],
         columns="variableId",
         values="value",
     ).reset_index()
+    log.info("fetch_dataset_from_data_values.pivot", t=round(time.time() - t, 3))
 
     # downcast types
     # NOTE: this would be easier if we had type for every variable in DB
-    for col in df.columns:
+    t = time.time()
+    for col in df.select_dtypes(include=["object"]).columns:
         df[col] = pd.to_numeric(df[col], errors="ignore")
+    log.info("fetch_dataset_from_data_values.to_numeric", t=round(time.time() - t, 3))
 
     # use variable names for columns
     df = df.rename(columns=id_to_name)
+
+    df = _add_entity_name_and_code(df)
+
+    df["entityName"] = df["entityName"].astype("category")
+    df["entityCode"] = df["entityCode"].astype("category")
 
     return df
 
 
 def _fetch_dataset_from_catalog(
     catalog_path: str,
-    variable_short_names: list[str],
-    short_name_to_name: dict[int, str],
+    variable_short_names: Optional[list[str]],
 ) -> pd.DataFrame:
+    # NOTE: we try to return the dataframe in the same format as it is stored in the catalog
+    # we might actually just redirect them to the parquet URL
     parquet_path = (settings.OWID_CATALOG_DIR / catalog_path).with_suffix(".parquet")
 
+    if variable_short_names:
+        columns = ["entity_id", "year"] + variable_short_names
+    else:
+        columns = None
+
     # materializing in pandas might be unnecessary, we could send byte response directly
-    df = pq.read_table(
-        parquet_path,
-        # TODO: there should be dimensions from dataset metadata
-        columns=["entity_id", "year"] + variable_short_names,
-        # TODO: we could ignore rows with all missing values
-        # filters=[(variable_short_name, "!=", np.nan)],
-    ).to_pandas()
+    try:
+        pq_table = pq.read_table(
+            parquet_path,
+            columns=columns,
+            # TODO: we could ignore rows with all missing values
+            # filters=[(variable_short_name, "!=", np.nan)],
+        )
+    except ArrowInvalid as e:
+        raise HTTPException(
+            status_code=404, detail=f"columns `{columns}` not found ({e})"
+        )
 
-    df = df.rename(
-        columns={
-            "entity_id": "entityId",
-            "year": "year",
-        }
-    )
-
-    return df.rename(columns=short_name_to_name)
+    return pq_table.to_pandas()
 
 
 @router.get(
@@ -247,15 +269,15 @@ def data_for_dataset_id(
             status_code=404, detail=f"datasetId `{dataset_id}` not found"
         )
 
-    # this should use short names, but we don't have them for variables from MySQL
-    if columns:
-        variables_df = variables_df[variables_df.name.isin(columns)]
-        if variables_df.empty:
-            raise HTTPException(
-                status_code=404, detail=f"columns `{columns}` not found"
-            )
-
     if variables_df.catalogPath.isnull().all():
+        # this should use short names, but we don't have them for variables from MySQL
+        if columns:
+            variables_df = variables_df[variables_df.name.isin(columns)]
+            if variables_df.empty:
+                raise HTTPException(
+                    status_code=404, detail=f"columns `{columns}` not found"
+                )
+
         df = _fetch_dataset_from_data_values(
             list(variables_df.id), variables_df.set_index("id").name
         )
@@ -269,18 +291,7 @@ def data_for_dataset_id(
                 "Datasets with multiple tables are not yet supported"
             )
 
-        # -- use names without dimensions suffix
-        # COALESCE(dimensions->>"$.originalShortName", shortName) AS shortName,
-        # COALESCE(dimensions->>"$.originalName", name) AS name,
-
-        # group dimensions together into single variables
-        variables_df = variables_df.drop_duplicates(subset=["shortName"])
-
-        df = _fetch_dataset_from_catalog(
-            variables_df.catalogPath.iloc[0],
-            list(variables_df.shortName),
-            variables_df.set_index("shortName").name,
-        )
+        df = _fetch_dataset_from_catalog(variables_df.catalogPath.iloc[0], columns)
         return _df_to_format(df, format)
 
     else:

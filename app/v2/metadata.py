@@ -141,6 +141,8 @@ def metadata_for_variable_id(
     inferred_type = pd.api.types.infer_dtype(variableData["values"])
     if inferred_type == "floating":
         variableMetadata["type"] = "float"
+    elif inferred_type == "integer":
+        variableMetadata["type"] = "int"
     else:
         raise NotImplementedError()
 
@@ -196,7 +198,7 @@ def metadata_for_dataset_id(dataset_id: int):
     assert dataset_df.shape[0] == 1, "Expected exactly one source per dataset"
 
     ds = dataset_df.iloc[0].to_dict()
-    ds['sourceDescription'] = json.loads(ds['sourceDescription'])
+    ds["sourceDescription"] = json.loads(ds["sourceDescription"])
 
     # add all dataset variables
     sql = """

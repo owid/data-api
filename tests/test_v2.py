@@ -157,10 +157,10 @@ def test_variableById_metadata_for_variable_catalog():
 def test_datasetById_data_for_dataset_data_values():
     response = client.get(
         "/v2/datasetById/data/941.feather",
-        params={"columns": ["ATM (Comin and Hobijn (2004))"], "limit": 2},
+        params={"columns": ["ATM (Comin and Hobijn (2004))"]},
     )
     assert response.status_code == 200
-    df = pd.read_feather(io.BytesIO(response.content))
+    df = pd.read_feather(io.BytesIO(response.content)).head(2)
     assert df.to_dict(orient="list") == {
         "year": [1988, 1989],
         "entityId": [13, 13],
@@ -173,16 +173,16 @@ def test_datasetById_data_for_dataset_data_values():
 def test_datasetById_data_for_dataset_catalog():
     response = client.get(
         "/v2/datasetById/data/5839.feather",
-        params={"columns": ["GDP", "Population"], "limit": 2},
+        params={"columns": ["gdp", "population"]},
     )
     assert response.status_code == 200
-    df = pd.read_feather(io.BytesIO(response.content))
+    df = pd.read_feather(io.BytesIO(response.content)).head(2)
     df = df.fillna("nan")
     assert df.to_dict(orient="list") == {
-        "entityId": [15, 15],
+        "entity_id": [15, 15],
         "year": [1820, 1870],
-        "GDP": ["nan", "nan"],
-        "Population": [3280000.0, 4207000.0],
+        "gdp": ["nan", "nan"],
+        "population": [3280000.0, 4207000.0],
     }
 
 
@@ -255,13 +255,13 @@ def test_variableById_data_for_variable_catalog_with_dimensions():
 def test_datasetById_data_for_dataset_catalog_with_dimensions():
     response = client.get(
         "/v2/datasetById/data/5775.feather",
-        # params={"columns": ["GDP", "Population"], "limit": 2},
+        # params={"columns": ["GDP", "Population"]},
     )
     assert response.status_code == 200
     df = pd.read_feather(io.BytesIO(response.content))
-    df = df.fillna("nan")
     assert df.head(2).to_dict(orient="list") == {
-        "entityId": [15, 15],
+        "sex": ["male", "male"],
+        "entity_id": [15, 15],
         "year": [-10000, -9000],
-        "Population density": [0.023000000044703484, 0.03099999949336052],
+        "population_density": [0.023000000044703484, 0.03099999949336052],
     }
