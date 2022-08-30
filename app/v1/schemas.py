@@ -14,6 +14,7 @@ class VariableDataResponse(BaseModel):
     class Config:
         extra = Extra.forbid
 
+
 class VariableDisplayDataTableConfig(BaseModel):
     hideAbsoluteChange: Optional[bool]
     hideRelativeChange: Optional[bool]

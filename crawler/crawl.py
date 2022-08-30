@@ -1,14 +1,15 @@
+import json
 import os
-import urllib.error
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional, Set, Tuple, cast
 
 import pandas as pd
+import pyarrow.parquet as pq
 import structlog
 import typer
-from owid.catalog import RemoteCatalog, Table, VariableMeta
+from owid.catalog import RemoteCatalog, TableMeta, VariableMeta
 from owid.catalog.catalogs import CatalogFrame, CatalogSeries
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm.session import Session
@@ -61,52 +62,14 @@ def _load_catalog_frame(channels=()) -> CatalogFrame:
     return frame
 
 
-def _fillna_for_categories(df: pd.DataFrame) -> pd.DataFrame:
-    for col in df.select_dtypes("category").columns:
-        if df[col].isnull().any():
-            df[col] = df[col].cat.add_categories(CATEGORY_NAN).fillna(CATEGORY_NAN)
-    return df
-
-
-def _load_table_data_into_db(m: MetaTableModel, table: Table, con) -> None:
-    table_path = m.path
-    # size_mb = table_path.stat().st_size / 1e6
-    log.info(
-        "loading_table.start",
-        path=table_path,
-        # size=f"{size_mb:.2f} MB",
-        shape=table.shape,
-    )
-
-    df = pd.DataFrame(table).reset_index()
-
-    df = _fillna_for_categories(df)
-
-    # unsigned integers are not supported, convert them to signed with higher range
-    # NOTE: this a workaround, it worked with loading from feather object, but it does
-    #  not work for pandas for some reason. It would be nice to keep them as unsigned
-    #  integers
-    DTYPE_MAP = {
-        "UInt32": "Int64",
-        "UInt16": "Int32",
-        "UInt8": "Int16",
-    }
-    for dtype_from, dtype_to in DTYPE_MAP.items():
-        df = df.astype({c: dtype_to for c in df.select_dtypes(dtype_from).columns})
-
-    # NOTE: Int64 type is stored in DuckDB as NULLABLE BIGINT, because it is nullable
-    # calling `fetch_df` on a query converts it to float64 instead of Int64 which is confusing
-
-    con.execute("register", ("t", df))
-    con.execute(f"CREATE OR REPLACE TABLE {m.table_db_name} AS SELECT * FROM t")
-
-    log.info(
-        "loading_table.end",
-    )
-
-
-def _variable_types(con, table_name) -> dict:
-    mf = pd.read_sql(f"PRAGMA table_info('{table_name}')", con)
+def _variable_types(con, parquet_path) -> dict:
+    q = f"""
+    select
+        name,
+        type
+    from parquet_schema('{parquet_path}')
+    """
+    mf = pd.read_sql(q, con)
     return mf.set_index("name")["type"].to_dict()
 
 
@@ -180,7 +143,6 @@ def _parse_meta_variable(
         else None,
         short_name=short_name,
         table_path=m.path,
-        table_db_name=m.table_db_name,
         variable_type=variable_type,
         dataset_short_name=dataset_short_name,
         dataset_path=dataset_path,
@@ -216,37 +178,32 @@ def _datasets_updates(
     return dataset_paths_to_delete, dataset_paths_to_create
 
 
-def _load_data_from_catalog(catalog_row: CatalogSeries) -> Table:
-    log.info("table.download.start", path=catalog_row["path"])
-    try:
-        data_table = catalog_row.load()
-    except urllib.error.HTTPError as e:
-        # TODO: this should happen very rarely only if data is not synced with catalog
-        # we should raise an exception once we turn on backporting and make it fast enough
-        assert (
-            e.code != 403
-        ), f"Dataset {catalog_row['path']} is private and returning 403"
-        raise e
-
-    log.info("table.download.end", path=catalog_row["path"])
-    return data_table
-
-
-def _extract_dimension_values(multiindex: pd.Index) -> dict[str, Any]:
-    dims_to_process = set(multiindex.names)
-
+def _extract_dimension_values(
+    parquet_path: str, dims_to_process: Set[str], engine
+) -> dict[str, Any]:
     dimension_values = {}
+
+    if not dims_to_process:
+        return {}
 
     # entities belong together and has to be stored as tuple `entity_id|entity_name|entity_code`
     # NOTE: this might be generalized to any column name with `_id`, `_name`, `_code` suffix
     if {"entity_id", "entity_name", "entity_code"} <= dims_to_process:
         dims_to_process = dims_to_process - {"entity_id", "entity_name", "entity_code"}
+
+        q = f"""
+        select distinct
+            entity_id, entity_name, entity_code
+        from read_parquet('{parquet_path}')
+        """
+        df = pd.read_sql(q, engine)
+
         index_vals = sorted(
             set(
                 zip(
-                    multiindex.get_level_values("entity_id"),
-                    multiindex.get_level_values("entity_name"),
-                    multiindex.get_level_values("entity_code"),
+                    df["entity_id"],
+                    df["entity_name"],
+                    df["entity_code"],
                 )
             )
         )
@@ -256,13 +213,32 @@ def _extract_dimension_values(multiindex: pd.Index) -> dict[str, Any]:
         }
 
     for dim in dims_to_process:
-        dimension_values[dim] = sorted(set(multiindex.get_level_values(dim)))
+        q = f"""
+        select distinct {dim}
+        from read_parquet('{parquet_path}')
+        """
+        df = pd.read_sql(q, engine)
+
+        dimension_values[dim] = sorted(set(df[dim].dropna()))
 
     return dimension_values
 
 
+def _read_parquet_metadata(
+    parquet_path: Path,
+) -> tuple[TableMeta, dict[str, VariableMeta]]:
+    meta = pq.read_metadata(parquet_path)
+    table_meta = TableMeta.from_json(meta.metadata[b"owid_table"])  # type: ignore
+
+    owid_fields = json.loads(meta.metadata[b"owid_fields"])
+    fields_meta = {f: VariableMeta.from_dict(v) for f, v in owid_fields.items()}
+
+    return table_meta, fields_meta
+
+
 def main(
     duckdb_path: Path = Path("duck.db"),
+    owid_catalog_dir: Path = Path("../etl/data"),
     include: Optional[str] = typer.Option(
         None, help="Include datasets matching this regex"
     ),
@@ -309,12 +285,24 @@ def main(
             catalog_row = cast(CatalogSeries, catalog_row)
 
             log.info(
-                "table.load_from_catalog",
+                "table.read_parquet_metadata",
                 path=catalog_row.path,
             )
-            data_table = _load_data_from_catalog(catalog_row)
 
-            dimension_values = _extract_dimension_values(data_table.index)
+            parquet_path = (owid_catalog_dir / catalog_row.path).with_suffix(".parquet")
+
+            table_meta, fields_meta = _read_parquet_metadata(parquet_path)
+
+            log.info(
+                "table.extract_dimension_values",
+                path=catalog_row.path,
+            )
+
+            # NOTE: this requires reading parquet file, which could be slow. We could instead write
+            # dimensions values to metadata when generating the parquet file.
+            dimension_values = _extract_dimension_values(
+                parquet_path, set(catalog_row.dimensions), engine
+            )
 
             t = MetaTableModel.from_CatalogSeries(catalog_row, dimension_values)
 
@@ -325,7 +313,7 @@ def main(
 
             with new_session(engine) as session:
                 # save dataset metadata alongside table, we could also create a separate table for datasets
-                ds = data_table.metadata.dataset
+                ds = table_meta.dataset
                 assert ds is not None
 
                 # exceptions for backported channel
@@ -354,16 +342,13 @@ def main(
                     )
                     dataset_inserted = True
 
-                _load_table_data_into_db(t, data_table, engine)
-
                 # get variable types from DB
-                # NOTE: should we get it from data or from DB?
-                variable_types = _variable_types(engine, t.table_db_name)
-                # variable_types = data_table.reset_index().dtypes.astype(str).to_dict()
+                assert t.path
+                variable_types = _variable_types(engine, parquet_path)
 
                 # table with variables
                 variables = []
-                for variable_short_name, variable_meta in data_table._fields.items():
+                for variable_short_name, variable_meta in fields_meta.items():
                     if variable_short_name in t.dimensions:
                         continue
 

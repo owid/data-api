@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, cast
 import numpy as np
 import pandas as pd
 import structlog
-from fastapi import APIRouter, HTTPException, Response, Header
+from fastapi import APIRouter, Header, HTTPException, Response
 
 from app import utils
 
@@ -61,7 +61,11 @@ def metadata_for_etl_variable(
     response_model=VariableMetadataResponse,
     response_model_exclude_unset=True,
 )
-def metadata_for_backported_variable(response: Response, variable_id: int, if_none_match: Optional[str] = Header(default=None)):
+def metadata_for_backported_variable(
+    response: Response,
+    variable_id: int,
+    if_none_match: Optional[str] = Header(default=None),
+):
     """Fetch metadata for a single variable from database.
     This function is identical to Variables.getVariableData in owid-grapher repository
     """
@@ -97,7 +101,7 @@ def metadata_for_backported_variable(response: Response, variable_id: int, if_no
         d.checksum as checksum,
     FROM meta_variables as v
     JOIN meta_datasets as d ON d.short_name = v.dataset_short_name
-    join meta_tables t on v.table_db_name = t.table_db_name
+    join meta_tables t on v.table_path = t.path
     WHERE v.variable_id = (?)
     """
     con = utils.get_readonly_connection(threading.get_ident())
@@ -141,7 +145,9 @@ def metadata_for_backported_variable(response: Response, variable_id: int, if_no
     # Send the checksum as the etag header and set cache-control to cache with
     # max-age of 0 (which makes the client validate with the if-none-match header)
     response.headers["ETag"] = checksum
-    response.headers["Cache-Control"] = "max-age=0" # We could consider allowing a certain time window
+    response.headers[
+        "Cache-Control"
+    ] = "max-age=0"  # We could consider allowing a certain time window
 
     # get variable types from duckdb (all metadata would be eventually retrieved in duckdb)
     # NOTE: getting these is a bit of a pain, we have a lot of duplicate information
@@ -213,7 +219,6 @@ def _metadata_etl_variables(con, table_path):
         -- v.variable_id,
         v.short_name,
         v.table_path,
-        v.table_db_name,
         v.dataset_short_name,
         v.variable_type,
         -- TODO: should we include `dimension_values` in response or do we only need it for backported variables?
@@ -236,7 +241,6 @@ def _metadata_etl_table(con, table_path):
     SELECT
         table_name,
         dataset_name,
-        table_db_name,
         version,
         namespace,
         channel,

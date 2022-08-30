@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from pyarrow.feather import write_feather
 
 from app import utils
-from crawler.utils import sanitize_table_path
+from app.main import settings
 
 from .schemas import VariableDataResponse
 
@@ -121,10 +121,10 @@ def data_for_backported_variable(
     select
         v.variable_id as variable_id,
         v.short_name as short_name,
-        v.table_db_name as table_db_name,
+        v.table_path as table_path,
         d.checksum as checksum
     from meta_variables v
-    join meta_tables t on v.table_db_name = t.table_db_name
+    join meta_tables t on v.table_path = t.path
     join meta_datasets d on d.path = t.dataset_path
     where variable_id = (?)
     """
@@ -148,6 +148,8 @@ def data_for_backported_variable(
         "Cache-Control"
     ] = "max-age=0"  # We could consider allowing a certain time window
 
+    parquet_path = (settings.OWID_CATALOG_DIR / r["table_path"]).with_suffix(".parquet")
+
     # TODO: DuckDB / SQLite doesn't allow parameterized table or column names, how do we escape it properly?
     # is it even needed if we get them from our DB and it is read-only?
     q = f"""
@@ -157,7 +159,7 @@ def data_for_backported_variable(
         entity_id as entities,
         entity_code as entity_codes,
         {r["short_name"]} as values
-    from {r["table_db_name"]}
+    from read_parquet('{parquet_path}')
     where {r["short_name"]} is not null
     """
     parameters = []
@@ -190,13 +192,15 @@ def data_for_etl_table(
     """Fetch data for a table."""
 
     con = utils.get_readonly_connection(threading.get_ident())
-    table_db_name = sanitize_table_path(
-        f"{channel}/{namespace}/{version}/{dataset}/{table}"
+    table_path = (
+        settings.OWID_CATALOG_DIR
+        / f"{channel}/{namespace}/{version}/{dataset}/{table}.parquet"
     )
+
     sql = f"""
     select
         {columns}
-    from {table_db_name}
+    from read_parquet('{table_path}')
     limit (?)
     """
 
