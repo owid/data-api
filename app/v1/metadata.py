@@ -135,19 +135,9 @@ def metadata_for_backported_variable(
     # at the moment
     checksum = row.pop("checksum")
 
+    response = utils.set_cache_control(response, if_none_match, checksum)
+
     variable = utils.omit_nullable_values(row)
-
-    # if the client sent a IF-NONE-MATCH header, check if it matches the checksum
-    if if_none_match == checksum:
-        response.status_code = 304
-        return
-
-    # Send the checksum as the etag header and set cache-control to cache with
-    # max-age of 0 (which makes the client validate with the if-none-match header)
-    response.headers["ETag"] = checksum
-    response.headers[
-        "Cache-Control"
-    ] = "max-age=0"  # We could consider allowing a certain time window
 
     # get variable types from duckdb (all metadata would be eventually retrieved in duckdb)
     # NOTE: getting these is a bit of a pain, we have a lot of duplicate information

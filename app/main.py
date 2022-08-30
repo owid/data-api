@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.v1 import v1
+from app.v2 import v2
 
 log = structlog.get_logger()
 
@@ -38,6 +39,7 @@ app = get_application()
 
 # mount subapplications as versions
 app.mount("/v1", v1)
+app.mount("/v2", v2)
 
 
 @app.get("/health")
